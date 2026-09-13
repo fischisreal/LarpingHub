@@ -81,11 +81,7 @@ local VICTIM_ATTACK_ATTRIBUTES = {
 }
 
 local SELF_DANGER_ATTRIBUTES = {
-	"Grabbed",
-	"Grabbing",
-	"BeingGrabbed",
-	"Frozen",
-	"Stunned",
+	"fih"
 }
 
 local VICTIM_INDICATOR_FOLDERS = {
