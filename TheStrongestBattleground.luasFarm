@@ -15,8 +15,8 @@ local STOPPED = false
 
 local DEFAULT_DISTANCE = 5
 local MIN_DISTANCE = 4
-local LMB_DISTANCE = 1.8
-local KEY_DISTANCE = 2.75
+local LMB_DISTANCE = 2.5
+local KEY_DISTANCE = 3.25
 local CURRENT_DISTANCE = DEFAULT_DISTANCE
 
 local BELOW_DISTANCE = 4
@@ -24,35 +24,35 @@ local MIN_BELOW_DISTANCE = 1
 local MAX_BELOW_DISTANCE = 30
 local CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 
-local BEHIND_DISTANCE = 2.6
-local BEHIND_Y_OFFSET = -0.5
+local BEHIND_DISTANCE = 3.5
+local BEHIND_Y_OFFSET = 0
 
 local GROUND_SINK = 1.5
 
-local MELEE_STICKY_DURATION = 0.85
-local COMBAT_STANDOFF = 1.0
-local COMBAT_Y_OFFSET = -0.5
+local MELEE_STICKY_DURATION = 0.6
+local COMBAT_STANDOFF = 1.5
+local COMBAT_Y_OFFSET = 0
 
-local POSITION_SMOOTHNESS = 70
+local POSITION_SMOOTHNESS = 40
 local AWAY_DIR_MEMORY = 1.5
 
 local DAMAGE_PUSH_BACK = 1.5
 local DAMAGE_NUDGE = 0.5
 local USER_ATTACK_RANGE = 10
-local DAMAGE_REACTION_LIMIT = 3
+local DAMAGE_REACTION_LIMIT = 2
 
 local TEAMER_DEFENSE_ENABLED = true
-local TEAMER_HOSTILE_COUNT = 1
-local TEAMER_HOSTILE_RADIUS = 26
-local TEAMER_FACING_DOT = 0.15
-local TEAMER_HOSTILE_MIN_SPEED = 2
-local TEAMER_MOVEMENT_MEMORY = 1.0
-local TEAMER_PARK_TIME = 3.5
-local DAMAGE_BURST_WINDOW = 1.0
+local TEAMER_HOSTILE_COUNT = 2
+local TEAMER_HOSTILE_RADIUS = 22
+local TEAMER_FACING_DOT = 0.35
+local TEAMER_HOSTILE_MIN_SPEED = 2.5
+local TEAMER_MOVEMENT_MEMORY = 0.75
+local TEAMER_PARK_TIME = 2.5
+local DAMAGE_BURST_WINDOW = 0.8
 local DAMAGE_BURST_COUNT = 2
-local PANIC_PARK_TIME = 3
+local PANIC_PARK_TIME = 2
 
-local FINISHER_HP_THRESHOLD = 20
+local FINISHER_HP_THRESHOLD = 15
 
 local PARTICLE_RECOVERY_ENABLED = true
 local PARTICLE_RESCAN_INTERVAL = 0.15
@@ -75,8 +75,8 @@ local ONE_BACK_AMOUNT = 0.75
 
 local LMB_CHECK_DELAY = 0.4
 
-local HEAVY_DAMAGE_THRESHOLD = 12
-local LOW_HEALTH_THRESHOLD = 40
+local HEAVY_DAMAGE_THRESHOLD = 15
+local LOW_HEALTH_THRESHOLD = 30
 
 local SMART_TARGETING_ENABLED = true
 local SMART_POSITION_ENABLED = true
@@ -91,12 +91,12 @@ local MACRO_GO_VICTIM_WAIT = 1
 local MACRO_RECOVERY_WAIT = 5
 
 local FACING_DOT_THRESHOLD = 0.35
-local PREDICTION_HISTORY = 10
+local PREDICTION_HISTORY = 6
 local THREAT_RADIUS = 30
-local THREAT_COUNT_TRIGGER = 1
-local SELF_HP_RECOVERY_PCT = 0.5
+local THREAT_COUNT_TRIGGER = 2
+local SELF_HP_RECOVERY_PCT = 0.4
 local SELF_DPS_WINDOW = 1.5
-local SELF_DPS_RECOVERY_THRESHOLD = 20
+local SELF_DPS_RECOVERY_THRESHOLD = 25
 
 local PROMPT_INTERACT_DISTANCE = 16
 
@@ -109,10 +109,10 @@ local HUD_ENABLED = true
 local HELP_ENABLED = false
 
 local PREDICTION_ENABLED = true
-local PREDICTION_STRENGTH = 1.35
-local PREDICTION_LOOKAHEAD = 0.16
-local PREDICTION_MOVE_COMPENSATION = 0.6
-local PREDICTION_MAX_OFFSET = 22
+local PREDICTION_STRENGTH = 1.0
+local PREDICTION_LOOKAHEAD = 0.12
+local PREDICTION_MOVE_COMPENSATION = 0.4
+local PREDICTION_MAX_OFFSET = 18
 
 local RECOVERY_ON_ATTACK = true
 local INSTANT_INTERACT_ENABLED = true
@@ -176,7 +176,6 @@ local holdReleaseToken = 0
 local lmbMissToken = 0
 
 local velocityHistory = {}
-local accelerationHistory = {}
 
 local combatStickyUntil = 0
 
@@ -197,13 +196,6 @@ local macroToken = 0
 
 local teamerParkUntil = 0
 local teamerParkToken = 0
-
-local defensiveWatch = false
-local defensiveWatchUntil = 0
-local lastTeamerDamageAt = 0
-
-local damagedByTargetAt = 0
-local lastTargetDamageSource = nil
 
 local cachedAwayDir = Vector3.new(0, 0, 1)
 local cachedLookFlat = Vector3.new(0, 0, -1)
@@ -280,6 +272,25 @@ local function isFinisherTarget()
 	if not humanoid then return false end
 
 	return humanoid.Health <= FINISHER_HP_THRESHOLD
+end
+
+local function isAnchoredTarget(model)
+	if not model then return false end
+	local root = getRoot(model)
+	if not root then return false end
+	return root.Anchored == true
+end
+
+local function hasGrabbedFolder(model)
+	if not model then return false end
+	return model:FindFirstChild("Grabbed") ~= nil
+end
+
+local function isProtectedFromTeamerDetection(model)
+	if not model then return true end
+	if isAnchoredTarget(model) then return true end
+	if hasGrabbedFolder(model) then return true end
+	return false
 end
 
 local function isBlacklistedName(name)
@@ -376,7 +387,7 @@ local function scoreTarget(model)
 
 	local maxHp = math.max(humanoid.MaxHealth, 1)
 	local hpPct = math.clamp(humanoid.Health / maxHp, 0, 1)
-	local hpScore = (1 - hpPct) * 55
+	local hpScore = (1 - hpPct) * 40
 
 	local toMe = myRoot.Position - root.Position
 	local flat = Vector3.new(toMe.X, 0, toMe.Z)
@@ -386,16 +397,11 @@ local function scoreTarget(model)
 		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
 		if look.Magnitude > 0.05 then
 			local dot = look.Unit:Dot(flat.Unit)
-			facingScore = math.max(0, dot) * 35
+			facingScore = math.max(0, dot) * 25
 		end
 	end
 
-	local revengeScore = 0
-	if lastTargetDamageSource == model and tick() - damagedByTargetAt < 6 then
-		revengeScore = 60
-	end
-
-	return dist - hpScore - facingScore - revengeScore
+	return dist - hpScore - facingScore
 end
 
 local function sortSmart(list)
@@ -453,7 +459,6 @@ local function lockTargetUnderMouse()
 		CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 		damageReactionCount = 0
 		velocityHistory = {}
-		accelerationHistory = {}
 		return true
 	end
 	return false
@@ -475,7 +480,6 @@ local function selectClosestTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
-	accelerationHistory = {}
 	return true
 end
 
@@ -496,7 +500,6 @@ local function cycleTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
-	accelerationHistory = {}
 	return true
 end
 
@@ -515,7 +518,6 @@ local function goToPreviousTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
-	accelerationHistory = {}
 
 	if isValidTarget(target) then
 		local tRoot = getRoot(target)
@@ -530,18 +532,7 @@ end
 local function updateVelocityHistory(root)
 	if not ADAPTIVE_PREDICTION_ENABLED then return end
 
-	local vel = root.AssemblyLinearVelocity
-
-	if #velocityHistory > 0 then
-		local last = velocityHistory[#velocityHistory]
-		local accel = (vel - last) / math.max(1 / 60, 0.016)
-		accelerationHistory[#accelerationHistory + 1] = accel
-		while #accelerationHistory > PREDICTION_HISTORY do
-			table.remove(accelerationHistory, 1)
-		end
-	end
-
-	velocityHistory[#velocityHistory + 1] = vel
+	velocityHistory[#velocityHistory + 1] = root.AssemblyLinearVelocity
 
 	while #velocityHistory > PREDICTION_HISTORY do
 		table.remove(velocityHistory, 1)
@@ -556,25 +547,8 @@ local function getSmoothedVelocity()
 	local weightTotal = 0
 
 	for i, v in ipairs(velocityHistory) do
-		local weight = (i / #velocityHistory) ^ 2
+		local weight = i / #velocityHistory
 		sum += v * weight
-		weightTotal += weight
-	end
-
-	if weightTotal == 0 then return nil end
-	return sum / weightTotal
-end
-
-local function getSmoothedAcceleration()
-	if not ADAPTIVE_PREDICTION_ENABLED then return nil end
-	if #accelerationHistory == 0 then return nil end
-
-	local sum = Vector3.zero
-	local weightTotal = 0
-
-	for i, a in ipairs(accelerationHistory) do
-		local weight = (i / #accelerationHistory) ^ 2
-		sum += a * weight
 		weightTotal += weight
 	end
 
@@ -587,17 +561,15 @@ local function predictPosition(root, deltaTime)
 
 	local pos = root.Position
 	local vel = getSmoothedVelocity() or root.AssemblyLinearVelocity
-	local accel = getSmoothedAcceleration() or Vector3.zero
 	local humanoid = getHumanoid(root.Parent)
 	local moveDir = humanoid and humanoid.MoveDirection or Vector3.zero
 
 	local dt = deltaTime or 0
 	local lookahead = PREDICTION_LOOKAHEAD + dt
 	local velLead = vel * (PREDICTION_STRENGTH * lookahead)
-	local accelLead = accel * (0.5 * PREDICTION_STRENGTH * lookahead * lookahead)
 	local walkLead = moveDir * (PREDICTION_STRENGTH * PREDICTION_MOVE_COMPENSATION)
 
-	local predicted = pos + velLead + accelLead + walkLead
+	local predicted = pos + velLead + walkLead
 	local offset = predicted - pos
 
 	if offset.Magnitude > PREDICTION_MAX_OFFSET then
@@ -834,9 +806,11 @@ local function countNearbyThreats()
 
 	local count = 0
 	for _, model in ipairs(getCandidates()) do
-		local root = getRoot(model)
-		if root and (root.Position - myRoot.Position).Magnitude <= THREAT_RADIUS then
-			count += 1
+		if not isProtectedFromTeamerDetection(model) then
+			local root = getRoot(model)
+			if root and (root.Position - myRoot.Position).Magnitude <= THREAT_RADIUS then
+				count += 1
+			end
 		end
 	end
 
@@ -847,27 +821,36 @@ local function updateMoverStatus()
 	local now = tick()
 
 	for _, model in ipairs(getCandidates()) do
-		local root = getRoot(model)
-		if root then
-			local speed = root.AssemblyLinearVelocity.Magnitude
-			local humanoid = getHumanoid(model)
-			local moving = speed >= TEAMER_HOSTILE_MIN_SPEED
+		if isProtectedFromTeamerDetection(model) then
+			recentMovers[model] = nil
+		else
+			local root = getRoot(model)
+			if root then
+				local speed = root.AssemblyLinearVelocity.Magnitude
+				local humanoid = getHumanoid(model)
+				local moving = speed >= TEAMER_HOSTILE_MIN_SPEED
 
-			if not moving and humanoid then
-				local moveDir = humanoid.MoveDirection
-				if moveDir.Magnitude >= 0.1 then
-					moving = true
+				if not moving and humanoid then
+					local moveDir = humanoid.MoveDirection
+					if moveDir.Magnitude >= 0.1 then
+						moving = true
+					end
 				end
-			end
 
-			if moving then
-				recentMovers[model] = now
+				if moving then
+					recentMovers[model] = now
+				end
 			end
 		end
 	end
 end
 
 local function isRecentMover(model)
+	if isProtectedFromTeamerDetection(model) then
+		recentMovers[model] = nil
+		return false
+	end
+
 	local last = recentMovers[model]
 	if not last then return false end
 	if tick() - last > TEAMER_MOVEMENT_MEMORY then
@@ -883,21 +866,23 @@ local function countHostilePlayers()
 
 	local count = 0
 	for _, model in ipairs(getCandidates()) do
-		local root = getRoot(model)
-		if root then
-			local toMe = myRoot.Position - root.Position
-			local dist = toMe.Magnitude
+		if not isProtectedFromTeamerDetection(model) then
+			local root = getRoot(model)
+			if root then
+				local toMe = myRoot.Position - root.Position
+				local dist = toMe.Magnitude
 
-			if dist <= TEAMER_HOSTILE_RADIUS then
-				local toMeFlat = Vector3.new(toMe.X, 0, toMe.Z)
-				local lookFlat = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+				if dist <= TEAMER_HOSTILE_RADIUS then
+					local toMeFlat = Vector3.new(toMe.X, 0, toMe.Z)
+					local lookFlat = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
 
-				if toMeFlat.Magnitude > 0.05 and lookFlat.Magnitude > 0.05 then
-					local facing = lookFlat.Unit:Dot(toMeFlat.Unit)
+					if toMeFlat.Magnitude > 0.05 and lookFlat.Magnitude > 0.05 then
+						local facing = lookFlat.Unit:Dot(toMeFlat.Unit)
 
-					if facing >= TEAMER_FACING_DOT then
-						if isRecentMover(model) then
-							count += 1
+						if facing >= TEAMER_FACING_DOT then
+							if isRecentMover(model) then
+								count += 1
+							end
 						end
 					end
 				end
@@ -906,26 +891,6 @@ local function countHostilePlayers()
 	end
 
 	return count
-end
-
-local function findNearestHostile()
-	local myRoot = getMyRoot()
-	if not myRoot then return nil end
-
-	local best, bestDist
-	for _, model in ipairs(getCandidates()) do
-		local root = getRoot(model)
-		if root then
-			local dist = (root.Position - myRoot.Position).Magnitude
-			if dist <= TEAMER_HOSTILE_RADIUS then
-				if not bestDist or dist < bestDist then
-					best = model
-					bestDist = dist
-				end
-			end
-		end
-	end
-	return best
 end
 
 local function countRecentDamageEvents()
@@ -961,7 +926,7 @@ local function checkTeamerThreat()
 	if not TEAMER_DEFENSE_ENABLED then return false end
 	if vCycleActive then return false end
 	if macroActive then return false end
-	if isFinisherTarget() then return false
+	if isFinisherTarget() then return false end
 
 	local recent = countRecentDamageEvents()
 	if recent >= DAMAGE_BURST_COUNT then
@@ -1199,25 +1164,8 @@ local function onMyHealthChanged(newHealth)
 	local damage = -delta
 	table.insert(selfDamageTimes, { time = tick(), damage = damage })
 
-	local attacker = findNearestHostile()
-	if attacker then
-		lastTargetDamageSource = attacker
-		damagedByTargetAt = tick()
-		lastTeamerDamageAt = tick()
-	end
-
 	if vCycleActive then return end
 	if isFinisherTarget() then return end
-
-	if defensiveWatch then
-		triggerTeamerPark(PANIC_PARK_TIME)
-		defensiveWatchUntil = tick() + PANIC_PARK_TIME
-	end
-
-	if attacker then
-		triggerTeamerPark(PANIC_PARK_TIME)
-		return
-	end
 
 	if damage > HEAVY_DAMAGE_THRESHOLD then
 		triggerTeamerPark(PANIC_PARK_TIME)
@@ -1405,7 +1353,6 @@ local function vCycle()
 					CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 					damageReactionCount = 0
 					velocityHistory = {}
-					accelerationHistory = {}
 				end
 
 				task.wait(V_CYCLE_DELAY)
@@ -1433,13 +1380,10 @@ local function stopEverything()
 	macroToken += 1
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	defensiveWatch = false
-	defensiveWatchUntil = 0
 	resetParticleTracking()
 	target = nil
 	previousTarget = nil
 	velocityHistory = {}
-	accelerationHistory = {}
 	combatStickyUntil = 0
 	cachedHead = nil
 	cachedHeadTarget = nil
@@ -1962,7 +1906,7 @@ local function createHelpPanel()
 	})
 
 	y = section(y, "SYSTEM", {
-		"M               teleport away from teamer / recovery",
+		"M               manual recovery",
 		"V                toggle V-cycle",
 		"P                toggle prediction",
 		"I                toggle instant interact",
@@ -2001,9 +1945,6 @@ local function updateHUD()
 	elseif particleRecoveryActive then
 		statusText = "PARTICLE"
 		statusColor = SPECIAL
-	elseif defensiveWatch then
-		statusText = "DEFEND"
-		statusColor = BAD
 	elseif tick() < teamerParkUntil then
 		statusText = "PARK"
 		statusColor = BAD
@@ -2160,12 +2101,9 @@ characterConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 	macroToken += 1
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	defensiveWatch = false
-	defensiveWatchUntil = 0
 	damageReactionCount = 0
 	positionMode = POSITION_BEHIND
 	velocityHistory = {}
-	accelerationHistory = {}
 	combatStickyUntil = 0
 	cachedHead = nil
 	cachedHeadTarget = nil
@@ -2194,10 +2132,6 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 	updateHUD()
 	updateSidebar(deltaTime)
 	updateMoverStatus()
-
-	if defensiveWatch and tick() >= defensiveWatchUntil then
-		defensiveWatch = false
-	end
 
 	if not ENABLED then
 		attachHealthWatcher(nil)
@@ -2295,9 +2229,8 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 
 	local teamerParking = (not vCycleActive) and (not finisher) and tick() < teamerParkUntil
 	local activeRecovery = (not vCycleActive) and (not finisher) and recoveryActive
-	local watching = defensiveWatch and (not finisher)
 
-	if teamerParking or activeRecovery or watching then
+	if teamerParking or activeRecovery then
 		parkCharacter()
 	elseif tick() < combatStickyUntil then
 		moveCharacterCombat(targetRoot, deltaTime)
@@ -2397,18 +2330,7 @@ inputConnection = UserInputService.InputBegan:Connect(function(input, gameProces
 	end
 
 	if input.KeyCode == Enum.KeyCode.M then
-		local hostile = findNearestHostile()
-		local hostiles = countHostilePlayers()
-
-		if hostile or hostiles >= 1 or tick() - lastTeamerDamageAt < 3 then
-			triggerTeamerPark(TEAMER_PARK_TIME)
-			defensiveWatch = true
-			defensiveWatchUntil = tick() + TEAMER_PARK_TIME
-			recoveryActive = false
-		else
-			defensiveWatch = false
-			setRecoveryMode(not recoveryActive)
-		end
+		setRecoveryMode(not recoveryActive)
 		return
 	end
 
