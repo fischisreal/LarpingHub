@@ -1,0 +1,2187 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local Stats = game:GetService("Stats")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+
+getgenv().AntiVoid = true
+
+local ENABLED = true
+local STOPPED = false
+
+local DEFAULT_DISTANCE = 5
+local MIN_DISTANCE = 4
+local LMB_DISTANCE = 2.5
+local KEY_DISTANCE = 3.25
+local CURRENT_DISTANCE = DEFAULT_DISTANCE
+
+local BELOW_DISTANCE = 4
+local MIN_BELOW_DISTANCE = 1
+local MAX_BELOW_DISTANCE = 30
+local CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+
+local BEHIND_DISTANCE = 3.5
+local BEHIND_Y_OFFSET = 0
+
+local GROUND_SINK = 1.5
+
+local MELEE_STICKY_DURATION = 0.6
+local COMBAT_STANDOFF = 1.5
+local COMBAT_Y_OFFSET = 0
+
+local POSITION_SMOOTHNESS = 40
+local AWAY_DIR_MEMORY = 1.5
+
+local DAMAGE_PUSH_BACK = 1.5
+local DAMAGE_NUDGE = 0.5
+local USER_ATTACK_RANGE = 10
+local DAMAGE_REACTION_LIMIT = 2
+
+local TEAMER_DEFENSE_ENABLED = true
+local TEAMER_HOSTILE_COUNT = 2
+local TEAMER_HOSTILE_RADIUS = 22
+local TEAMER_FACING_DOT = 0.35
+local TEAMER_HOSTILE_MIN_SPEED = 2.5
+local TEAMER_MOVEMENT_MEMORY = 0.75
+local TEAMER_PARK_TIME = 2.5
+local DAMAGE_BURST_WINDOW = 0.8
+local DAMAGE_BURST_COUNT = 2
+local PANIC_PARK_TIME = 2
+
+local FINISHER_HP_THRESHOLD = 15
+
+local PARTICLE_RECOVERY_ENABLED = true
+local PARTICLE_RESCAN_INTERVAL = 0.1
+local PARTICLE_GRACE_PERIOD = 0.35
+local PARTICLE_RECOVERY_SKIPS_FINISHER = true
+
+local HOLD_BACK_AMOUNT = 4.5
+local HOLD_RELEASE_DELAY = 2
+
+local ONE_BACK_AMOUNT = 0.75
+
+local LMB_CHECK_DELAY = 0.4
+
+local HEAVY_DAMAGE_THRESHOLD = 15
+local LOW_HEALTH_THRESHOLD = 30
+
+local SMART_TARGETING_ENABLED = true
+local SMART_POSITION_ENABLED = true
+local SMART_RECOVERY_ENABLED = true
+local ADAPTIVE_PREDICTION_ENABLED = true
+
+local VICTIM_CAM_ENABLED = true
+local SIDEBAR_ENABLED = true
+
+local MACRO_STEP_DELAY = 0.15
+local MACRO_GO_VICTIM_WAIT = 1
+local MACRO_RECOVERY_WAIT = 5
+
+local FACING_DOT_THRESHOLD = 0.35
+local PREDICTION_HISTORY = 6
+local THREAT_RADIUS = 30
+local THREAT_COUNT_TRIGGER = 2
+local SELF_HP_RECOVERY_PCT = 0.4
+local SELF_DPS_WINDOW = 1.5
+local SELF_DPS_RECOVERY_THRESHOLD = 25
+
+local PROMPT_INTERACT_DISTANCE = 16
+
+local PARK_POSITION = Vector3.new(0, 2000, 0)
+
+local V_CYCLE_ROUNDS = 2
+local V_CYCLE_DELAY = 0.35
+
+local HUD_ENABLED = true
+local HELP_ENABLED = true
+
+local PREDICTION_ENABLED = true
+local PREDICTION_STRENGTH = 1.0
+local PREDICTION_LOOKAHEAD = 0.12
+local PREDICTION_MOVE_COMPENSATION = 0.4
+local PREDICTION_MAX_OFFSET = 18
+
+local RECOVERY_ON_ATTACK = true
+local INSTANT_INTERACT_ENABLED = true
+
+local POSITION_BELOW = "below"
+local POSITION_BEHIND = "behind"
+local POSITION_AUTO = "auto"
+local positionMode = POSITION_BEHIND
+
+local ATTACK_ANIMATION_IDS = {
+	"rbxassetid://1234567890",
+	"rbxassetid://1234567891",
+	"rbxassetid://1234567892",
+}
+
+local target
+local previousTarget
+local candidates = {}
+
+local mainConnection
+local inputConnection
+local inputEndedConnection
+local characterConnection
+local trackedConnections = {}
+
+local recoveryActive = false
+local vCycleActive = false
+local vCycleVersion = 0
+
+local HUD
+local helpGui
+local sidebar
+
+local healthConnection = nil
+local watchedHumanoid = nil
+local lastHealth = 0
+local damageReactionCount = 0
+
+local myHealthConnection = nil
+local lastMyHealth = 0
+local selfDamageTimes = {}
+
+local keyFourHeld = false
+local lmbHeld = false
+local holdBackActive = false
+local holdReleaseToken = 0
+local lmbMissToken = 0
+
+local velocityHistory = {}
+
+local combatStickyUntil = 0
+
+local cachedHeadTarget = nil
+local cachedHead = nil
+
+local killCount = 0
+local lowHpCount = 0
+
+local fpsFrames = 0
+local fpsAccum = 0
+local fpsDisplay = 0
+local pingDisplay = 0
+local statsAccum = 0
+
+local macroActive = false
+local macroToken = 0
+
+local teamerParkUntil = 0
+local teamerParkToken = 0
+
+local cachedAwayDir = Vector3.new(0, 0, 1)
+local cachedLookFlat = Vector3.new(0, 0, -1)
+
+local cachedVictimHasParticles = false
+local lastParticleCheck = 0
+local lastParticleSeenAt = 0
+local particleRecoveryActive = false
+
+local recentMovers = {}
+
+local function track(connection)
+	trackedConnections[#trackedConnections + 1] = connection
+	return connection
+end
+
+local function getHumanoid(model)
+	return model and model:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot(model)
+	return model and model:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHead(model)
+	if not model then return nil end
+	return model:FindFirstChild("Head")
+end
+
+local function getTorso(model, fallback)
+	if not model then return fallback end
+
+	local upper = model:FindFirstChild("UpperTorso")
+	if upper then return upper.Position end
+
+	local torso = model:FindFirstChild("Torso")
+	if torso then return torso.Position end
+
+	local chest = model:FindFirstChild("Chest")
+	if chest then return chest.Position end
+
+	return fallback
+end
+
+local function isValidTarget(model)
+	if not model or not model:IsA("Model") then return false end
+	if model == LocalPlayer.Character then return false end
+	if not model:IsDescendantOf(workspace) then return false end
+
+	local humanoid = getHumanoid(model)
+	local root = getRoot(model)
+	if not humanoid or not root then return false end
+
+	return humanoid.Health > 0
+end
+
+local function isTrulyDead(model)
+	if not model then return true end
+	if not model.Parent then return true end
+	if not model:IsDescendantOf(workspace) then return true end
+
+	local humanoid = getHumanoid(model)
+	if not humanoid then return true end
+	if humanoid.Health <= 0 then return true end
+
+	return false
+end
+
+local function isFinisherTarget()
+	if not target then return false end
+	if not isValidTarget(target) then return false end
+
+	local humanoid = getHumanoid(target)
+	if not humanoid then return false end
+
+	return humanoid.Health <= FINISHER_HP_THRESHOLD
+end
+
+local function victimHasParticles()
+	if not target then return false end
+	if not isValidTarget(target) then return false end
+
+	for _, obj in ipairs(target:GetDescendants()) do
+		local isEffect =
+			obj:IsA("ParticleEmitter")
+			or obj:IsA("Trail")
+			or obj:IsA("Beam")
+			or obj:IsA("Fire")
+			or obj:IsA("Smoke")
+			or obj:IsA("Sparkles")
+
+		if isEffect and obj.Enabled then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function addCandidate(model)
+	if isValidTarget(model) then
+		candidates[model] = true
+	end
+end
+
+local function removeCandidate(model)
+	candidates[model] = nil
+	if target == model then
+		target = nil
+	end
+	if previousTarget == model then
+		previousTarget = nil
+	end
+	recentMovers[model] = nil
+end
+
+local function getCandidates()
+	local result = {}
+	for model in pairs(candidates) do
+		if isValidTarget(model) then
+			result[#result + 1] = model
+		else
+			candidates[model] = nil
+			recentMovers[model] = nil
+		end
+	end
+	return result
+end
+
+local function getModelFromPart(part)
+	local model = part and part:FindFirstAncestorOfClass("Model")
+	while model do
+		if getHumanoid(model) then
+			return model
+		end
+		model = model:FindFirstAncestorOfClass("Model")
+	end
+	return nil
+end
+
+local function getMyRoot()
+	local character = LocalPlayer.Character
+	return character and getRoot(character)
+end
+
+local function scoreTarget(model)
+	local myRoot = getMyRoot()
+	local root = getRoot(model)
+	local humanoid = getHumanoid(model)
+	if not myRoot or not root or not humanoid then return math.huge end
+
+	local dist = (root.Position - myRoot.Position).Magnitude
+
+	local maxHp = math.max(humanoid.MaxHealth, 1)
+	local hpPct = math.clamp(humanoid.Health / maxHp, 0, 1)
+	local hpScore = (1 - hpPct) * 40
+
+	local toMe = myRoot.Position - root.Position
+	local flat = Vector3.new(toMe.X, 0, toMe.Z)
+
+	local facingScore = 0
+	if flat.Magnitude > 0.05 then
+		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+		if look.Magnitude > 0.05 then
+			local dot = look.Unit:Dot(flat.Unit)
+			facingScore = math.max(0, dot) * 25
+		end
+	end
+
+	return dist - hpScore - facingScore
+end
+
+local function sortSmart(list)
+	if not SMART_TARGETING_ENABLED then
+		local myRoot = getMyRoot()
+		if myRoot then
+			table.sort(list, function(a, b)
+				local ra, rb = getRoot(a), getRoot(b)
+				if not ra then return false end
+				if not rb then return true end
+				return (ra.Position - myRoot.Position).Magnitude
+					< (rb.Position - myRoot.Position).Magnitude
+			end)
+		end
+		return list
+	end
+
+	table.sort(list, function(a, b)
+		return scoreTarget(a) < scoreTarget(b)
+	end)
+	return list
+end
+
+local function getTargetName(model)
+	local player = Players:GetPlayerFromCharacter(model)
+	if player then
+		return player.DisplayName .. " (@" .. player.Name .. ")"
+	end
+	return model.Name
+end
+
+local function resetParticleTracking()
+	cachedVictimHasParticles = false
+	lastParticleCheck = 0
+	lastParticleSeenAt = 0
+	particleRecoveryActive = false
+end
+
+local function setTarget(newTarget)
+	if newTarget ~= target then
+		previousTarget = target
+		resetParticleTracking()
+	end
+	target = newTarget
+end
+
+local function lockTargetUnderMouse()
+	local mouse = LocalPlayer:GetMouse()
+	if not mouse then return false end
+
+	local model = getModelFromPart(mouse.Target)
+	if model and isValidTarget(model) then
+		setTarget(model)
+		CURRENT_DISTANCE = DEFAULT_DISTANCE
+		CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+		damageReactionCount = 0
+		velocityHistory = {}
+		return true
+	end
+	return false
+end
+
+local function setDistance(value)
+	CURRENT_DISTANCE = math.max(MIN_DISTANCE, value)
+end
+
+local function selectClosestTarget()
+	local list = sortSmart(getCandidates())
+	if #list == 0 then
+		previousTarget = target
+		target = nil
+		return false
+	end
+	setTarget(list[1])
+	CURRENT_DISTANCE = DEFAULT_DISTANCE
+	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+	damageReactionCount = 0
+	velocityHistory = {}
+	return true
+end
+
+local function cycleTarget()
+	local list = sortSmart(getCandidates())
+	if #list == 0 then return false end
+
+	local index = 0
+	for i, model in ipairs(list) do
+		if model == target then
+			index = i
+			break
+		end
+	end
+
+	setTarget(list[(index % #list) + 1])
+	CURRENT_DISTANCE = DEFAULT_DISTANCE
+	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+	damageReactionCount = 0
+	velocityHistory = {}
+	return true
+end
+
+local function goToPreviousTarget()
+	if not previousTarget then return false end
+	if not isValidTarget(previousTarget) then
+		previousTarget = nil
+		return false
+	end
+
+	local temp = target
+	setTarget(previousTarget)
+	previousTarget = temp
+
+	CURRENT_DISTANCE = DEFAULT_DISTANCE
+	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+	damageReactionCount = 0
+	velocityHistory = {}
+
+	if isValidTarget(target) then
+		local tRoot = getRoot(target)
+		if tRoot then
+			combatStickyUntil = tick() + MELEE_STICKY_DURATION
+		end
+	end
+
+	return true
+end
+
+local function updateVelocityHistory(root)
+	if not ADAPTIVE_PREDICTION_ENABLED then return end
+
+	velocityHistory[#velocityHistory + 1] = root.AssemblyLinearVelocity
+
+	while #velocityHistory > PREDICTION_HISTORY do
+		table.remove(velocityHistory, 1)
+	end
+end
+
+local function getSmoothedVelocity()
+	if not ADAPTIVE_PREDICTION_ENABLED then return nil end
+	if #velocityHistory == 0 then return nil end
+
+	local sum = Vector3.zero
+	local weightTotal = 0
+
+	for i, v in ipairs(velocityHistory) do
+		local weight = i / #velocityHistory
+		sum += v * weight
+		weightTotal += weight
+	end
+
+	if weightTotal == 0 then return nil end
+	return sum / weightTotal
+end
+
+local function predictPosition(root, deltaTime)
+	if not PREDICTION_ENABLED then return root.Position end
+
+	local pos = root.Position
+	local vel = getSmoothedVelocity() or root.AssemblyLinearVelocity
+	local humanoid = getHumanoid(root.Parent)
+	local moveDir = humanoid and humanoid.MoveDirection or Vector3.zero
+
+	local dt = deltaTime or 0
+	local lookahead = PREDICTION_LOOKAHEAD + dt
+	local velLead = vel * (PREDICTION_STRENGTH * lookahead)
+	local walkLead = moveDir * (PREDICTION_STRENGTH * PREDICTION_MOVE_COMPENSATION)
+
+	local predicted = pos + velLead + walkLead
+	local offset = predicted - pos
+
+	if offset.Magnitude > PREDICTION_MAX_OFFSET then
+		predicted = pos + offset.Unit * PREDICTION_MAX_OFFSET
+	end
+
+	return predicted
+end
+
+local function applySmoothCFrame(root, targetCF, deltaTime)
+	if not root then return end
+
+	local dt = deltaTime or 0
+	if dt <= 0 then
+		root.CFrame = targetCF
+		return
+	end
+
+	local alpha = math.clamp(1 - math.exp(-POSITION_SMOOTHNESS * dt), 0, 1)
+	root.CFrame = root.CFrame:Lerp(targetCF, alpha)
+end
+
+local function parkCharacter()
+	local character = LocalPlayer.Character
+	local root = character and getRoot(character)
+	if root then
+		root.CFrame = CFrame.new(PARK_POSITION)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
+local function faceTorsoFrom(pos, targetRoot, predicted)
+	local torsoPos = getTorso(targetRoot.Parent, predicted + Vector3.new(0, 2, 0))
+	local dir = torsoPos - pos
+
+	if dir.Magnitude < 0.05 then
+		dir = Vector3.new(0, 1, 0)
+	end
+
+	return CFrame.lookAt(pos, pos + dir.Unit)
+end
+
+local function moveCharacterCombat(targetRoot, deltaTime)
+	local character = LocalPlayer.Character
+	local root = character and getRoot(character)
+	if not root then return end
+
+	local humanoid = getHumanoid(character)
+	local predicted = predictPosition(targetRoot, deltaTime or 0)
+	local torsoPos = getTorso(targetRoot.Parent, predicted + Vector3.new(0, 2, 0))
+
+	local myPos = root.Position
+	local awayRaw = Vector3.new(myPos.X - predicted.X, 0, myPos.Z - predicted.Z)
+
+	if awayRaw.Magnitude > AWAY_DIR_MEMORY then
+		cachedAwayDir = awayRaw.Unit
+	end
+
+	local awayDir = cachedAwayDir
+
+	local combatPos = Vector3.new(
+		predicted.X + awayDir.X * COMBAT_STANDOFF,
+		torsoPos.Y + COMBAT_Y_OFFSET,
+		predicted.Z + awayDir.Z * COMBAT_STANDOFF
+	)
+
+	local dir = torsoPos - combatPos
+	if dir.Magnitude < 0.05 then
+		dir = Vector3.new(0, 1, 0)
+	end
+
+	local newCF = CFrame.lookAt(combatPos, combatPos + dir.Unit)
+	applySmoothCFrame(root, newCF, deltaTime)
+
+	if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+	end
+end
+
+local function victimIsFacingMe(targetRoot)
+	if not SMART_POSITION_ENABLED then return false end
+
+	local myRoot = getMyRoot()
+	if not myRoot or not targetRoot then return false end
+
+	local toMe = Vector3.new(
+		myRoot.Position.X - targetRoot.Position.X,
+		0,
+		myRoot.Position.Z - targetRoot.Position.Z
+	)
+
+	if toMe.Magnitude < 0.05 then return true end
+
+	local look = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z)
+	if look.Magnitude < 0.05 then return false end
+
+	local dot = look.Unit:Dot(toMe.Unit)
+	return dot > FACING_DOT_THRESHOLD
+end
+
+local function moveCharacterBelow(targetRoot, deltaTime)
+	local character = LocalPlayer.Character
+	local root = character and getRoot(character)
+	if not root then return end
+
+	local humanoid = getHumanoid(character)
+	local predicted = predictPosition(targetRoot, deltaTime or 0)
+
+	local belowPos = Vector3.new(
+		predicted.X,
+		predicted.Y - CURRENT_BELOW_DISTANCE - GROUND_SINK,
+		predicted.Z
+	)
+
+	local newCF = faceTorsoFrom(belowPos, targetRoot, predicted)
+	applySmoothCFrame(root, newCF, deltaTime)
+
+	if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+	end
+end
+
+local function moveCharacterBehind(targetRoot, deltaTime)
+	local character = LocalPlayer.Character
+	local root = character and getRoot(character)
+	if not root then return end
+
+	local humanoid = getHumanoid(character)
+	local predicted = predictPosition(targetRoot, deltaTime or 0)
+
+	local lookFlatRaw = Vector3.new(
+		targetRoot.CFrame.LookVector.X,
+		0,
+		targetRoot.CFrame.LookVector.Z
+	)
+
+	if lookFlatRaw.Magnitude > 0.05 then
+		cachedLookFlat = lookFlatRaw.Unit
+	end
+
+	local lookFlat = cachedLookFlat
+
+	local behindPos = Vector3.new(
+		predicted.X - lookFlat.X * BEHIND_DISTANCE,
+		predicted.Y - BEHIND_Y_OFFSET - GROUND_SINK,
+		predicted.Z - lookFlat.Z * BEHIND_DISTANCE
+	)
+
+	local newCF = faceTorsoFrom(behindPos, targetRoot, predicted)
+	applySmoothCFrame(root, newCF, deltaTime)
+
+	if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+		humanoid:ChangeState(Enum.HumanoidStateType.Running)
+	end
+end
+
+local function resolvePositionMode(targetRoot)
+	if not SMART_POSITION_ENABLED then
+		return positionMode
+	end
+
+	if positionMode ~= POSITION_AUTO then
+		return positionMode
+	end
+
+	if victimIsFacingMe(targetRoot) then
+		return POSITION_BEHIND
+	end
+
+	return POSITION_BELOW
+end
+
+local function setCameraState(cameraType, subject)
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+
+	pcall(function()
+		if camera.CameraType ~= cameraType then
+			camera.CameraType = cameraType
+		end
+		if subject ~= nil and camera.CameraSubject ~= subject then
+			camera.CameraSubject = subject
+		end
+	end)
+end
+
+local function attachCameraToVictimHead(targetRoot)
+	if not targetRoot then return end
+
+	local character = targetRoot.Parent
+	if not character then return end
+
+	local currentHead = getHead(character)
+	if not currentHead then
+		cachedHeadTarget = character
+		cachedHead = nil
+		return
+	end
+
+	if cachedHeadTarget ~= character or cachedHead ~= currentHead then
+		cachedHeadTarget = character
+		cachedHead = currentHead
+	end
+
+	setCameraState(Enum.CameraType.Custom, cachedHead)
+end
+
+local function restoreCamera()
+	local character = LocalPlayer.Character
+	local humanoid = character and getHumanoid(character)
+	if humanoid then
+		setCameraState(Enum.CameraType.Custom, humanoid)
+	end
+end
+
+local function snapToCombat(targetRoot)
+	if not targetRoot then return end
+	if not isValidTarget(targetRoot.Parent) then return end
+	moveCharacterCombat(targetRoot, 0)
+end
+
+local function setRecoveryMode(enabled)
+	recoveryActive = enabled
+
+	if enabled then
+		parkCharacter()
+	end
+end
+
+local function countNearbyThreats()
+	local myRoot = getMyRoot()
+	if not myRoot then return 0 end
+
+	local count = 0
+	for _, model in ipairs(getCandidates()) do
+		local root = getRoot(model)
+		if root and (root.Position - myRoot.Position).Magnitude <= THREAT_RADIUS then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function updateMoverStatus()
+	local now = tick()
+
+	for _, model in ipairs(getCandidates()) do
+		local root = getRoot(model)
+		if root then
+			local speed = root.AssemblyLinearVelocity.Magnitude
+			local humanoid = getHumanoid(model)
+			local moving = speed >= TEAMER_HOSTILE_MIN_SPEED
+
+			if not moving and humanoid then
+				local moveDir = humanoid.MoveDirection
+				if moveDir.Magnitude >= 0.1 then
+					moving = true
+				end
+			end
+
+			if moving then
+				recentMovers[model] = now
+			end
+		end
+	end
+end
+
+local function isRecentMover(model)
+	local last = recentMovers[model]
+	if not last then return false end
+	if tick() - last > TEAMER_MOVEMENT_MEMORY then
+		recentMovers[model] = nil
+		return false
+	end
+	return true
+end
+
+local function countHostilePlayers()
+	local myRoot = getMyRoot()
+	if not myRoot then return 0 end
+
+	local count = 0
+	for _, model in ipairs(getCandidates()) do
+		local root = getRoot(model)
+		if root then
+			local toMe = myRoot.Position - root.Position
+			local dist = toMe.Magnitude
+
+			if dist <= TEAMER_HOSTILE_RADIUS then
+				local toMeFlat = Vector3.new(toMe.X, 0, toMe.Z)
+				local lookFlat = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+
+				if toMeFlat.Magnitude > 0.05 and lookFlat.Magnitude > 0.05 then
+					local facing = lookFlat.Unit:Dot(toMeFlat.Unit)
+
+					if facing >= TEAMER_FACING_DOT then
+						if isRecentMover(model) then
+							count += 1
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return count
+end
+
+local function countRecentDamageEvents()
+	local now = tick()
+	local count = 0
+
+	for i = #selfDamageTimes, 1, -1 do
+		local entry = selfDamageTimes[i]
+		if entry.time >= now - DAMAGE_BURST_WINDOW then
+			count += 1
+		else
+			break
+		end
+	end
+
+	return count
+end
+
+local function triggerTeamerPark(duration)
+	if vCycleActive then return end
+	if isFinisherTarget() then return end
+
+	local now = tick()
+	local newEnd = now + (duration or TEAMER_PARK_TIME)
+
+	if newEnd > teamerParkUntil then
+		teamerParkUntil = newEnd
+		teamerParkToken += 1
+	end
+end
+
+local function checkTeamerThreat()
+	if not TEAMER_DEFENSE_ENABLED then return false end
+	if vCycleActive then return false end
+	if macroActive then return false end
+	if isFinisherTarget() then return false end
+
+	local recent = countRecentDamageEvents()
+	if recent >= DAMAGE_BURST_COUNT then
+		triggerTeamerPark(PANIC_PARK_TIME)
+		return true
+	end
+
+	local hostiles = countHostilePlayers()
+	if hostiles >= TEAMER_HOSTILE_COUNT then
+		triggerTeamerPark(TEAMER_PARK_TIME)
+		return true
+	end
+
+	return false
+end
+
+local function countLowHpCandidates()
+	local count = 0
+	for _, model in ipairs(getCandidates()) do
+		local humanoid = getHumanoid(model)
+		if humanoid and humanoid.Health < LOW_HEALTH_THRESHOLD then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function getRecentSelfDps()
+	local now = tick()
+	local cutoff = now - SELF_DPS_WINDOW
+	local total = 0
+
+	for i = #selfDamageTimes, 1, -1 do
+		local entry = selfDamageTimes[i]
+		if entry.time >= cutoff then
+			total += entry.damage
+		else
+			table.remove(selfDamageTimes, i)
+		end
+	end
+
+	return total / SELF_DPS_WINDOW
+end
+
+local function startHoldBack()
+	if holdBackActive then return end
+	holdBackActive = true
+	holdReleaseToken += 1
+	CURRENT_BELOW_DISTANCE = math.clamp(
+		CURRENT_BELOW_DISTANCE + HOLD_BACK_AMOUNT,
+		MIN_BELOW_DISTANCE,
+		MAX_BELOW_DISTANCE
+	)
+end
+
+local function endHoldBack()
+	if not holdBackActive then return end
+	holdBackActive = false
+	holdReleaseToken += 1
+	local myToken = holdReleaseToken
+
+	task.delay(HOLD_RELEASE_DELAY, function()
+		if STOPPED then return end
+		if myToken ~= holdReleaseToken then return end
+		if holdBackActive then return end
+
+		CURRENT_BELOW_DISTANCE = math.clamp(
+			CURRENT_BELOW_DISTANCE - HOLD_BACK_AMOUNT,
+			MIN_BELOW_DISTANCE,
+			MAX_BELOW_DISTANCE
+		)
+	end)
+end
+
+local function evaluateHoldBack()
+	if keyFourHeld and lmbHeld then
+		startHoldBack()
+	else
+		endHoldBack()
+	end
+end
+
+local function scheduleLMBMissCheck()
+	lmbMissToken += 1
+	local myToken = lmbMissToken
+	local watchTarget = target
+
+	if not isValidTarget(watchTarget) then return end
+
+	local humanoid = getHumanoid(watchTarget)
+	if not humanoid then return end
+
+	local hpBefore = humanoid.Health
+
+	task.delay(LMB_CHECK_DELAY, function()
+		if STOPPED then return end
+		if myToken ~= lmbMissToken then return end
+		if target ~= watchTarget then return end
+		if not isValidTarget(watchTarget) then return end
+
+		local hpAfter = humanoid.Health
+		if hpAfter >= hpBefore then
+			if positionMode ~= POSITION_BELOW then
+				positionMode = POSITION_BEHIND
+			end
+		end
+	end)
+end
+
+local function simulateKey1()
+	CURRENT_BELOW_DISTANCE = math.clamp(
+		CURRENT_BELOW_DISTANCE + ONE_BACK_AMOUNT,
+		MIN_BELOW_DISTANCE,
+		MAX_BELOW_DISTANCE
+	)
+	positionMode = POSITION_BEHIND
+	if isValidTarget(target) then
+		setDistance(KEY_DISTANCE)
+	end
+end
+
+local function simulateKey3()
+	positionMode = POSITION_BEHIND
+	if isValidTarget(target) then
+		setDistance(KEY_DISTANCE)
+	end
+end
+
+local function cancelMacro()
+	if not macroActive then return end
+	macroActive = false
+	macroToken += 1
+end
+
+local function runMacro()
+	if macroActive then
+		cancelMacro()
+		return
+	end
+
+	macroToken += 1
+	macroActive = true
+	local myToken = macroToken
+
+	task.spawn(function()
+		setRecoveryMode(true)
+		task.wait(MACRO_STEP_DELAY)
+		if STOPPED or myToken ~= macroToken then macroActive = false return end
+
+		simulateKey1()
+		task.wait(MACRO_GO_VICTIM_WAIT)
+		if STOPPED or myToken ~= macroToken then macroActive = false return end
+
+		setRecoveryMode(false)
+		task.wait(MACRO_STEP_DELAY)
+		if STOPPED or myToken ~= macroToken then macroActive = false return end
+
+		setRecoveryMode(true)
+		task.wait(MACRO_RECOVERY_WAIT)
+		if STOPPED or myToken ~= macroToken then macroActive = false return end
+
+		simulateKey3()
+
+		macroActive = false
+	end)
+end
+
+local function onTargetHealthChanged(newHealth)
+	if STOPPED then return end
+	if not target or not isValidTarget(target) then return end
+
+	local delta = newHealth - lastHealth
+	lastHealth = newHealth
+
+	if newHealth <= 0 then
+		killCount += 1
+		return
+	end
+
+	if delta >= 0 then return end
+
+	if damageReactionCount >= DAMAGE_REACTION_LIMIT then return end
+
+	damageReactionCount += 1
+
+	local myRoot = getMyRoot()
+	local targetRoot = getRoot(target)
+
+	if not myRoot or not targetRoot then return end
+
+	local dist = (myRoot.Position - targetRoot.Position).Magnitude
+
+	if dist <= USER_ATTACK_RANGE then
+		CURRENT_BELOW_DISTANCE = math.clamp(
+			CURRENT_BELOW_DISTANCE + DAMAGE_PUSH_BACK,
+			MIN_BELOW_DISTANCE,
+			MAX_BELOW_DISTANCE
+		)
+	else
+		local nudge = (math.random() < 0.5) and -DAMAGE_NUDGE or DAMAGE_NUDGE
+		CURRENT_BELOW_DISTANCE = math.clamp(
+			CURRENT_BELOW_DISTANCE + nudge,
+			MIN_BELOW_DISTANCE,
+			MAX_BELOW_DISTANCE
+		)
+	end
+end
+
+local function attachHealthWatcher(model)
+	local humanoid = model and getHumanoid(model)
+
+	if humanoid == watchedHumanoid then return end
+
+	if healthConnection then
+		healthConnection:Disconnect()
+		healthConnection = nil
+	end
+
+	watchedHumanoid = humanoid
+	if not humanoid then return end
+
+	lastHealth = humanoid.Health
+	damageReactionCount = 0
+	healthConnection = humanoid.HealthChanged:Connect(onTargetHealthChanged)
+end
+
+local function onMyHealthChanged(newHealth)
+	if STOPPED then return end
+
+	local delta = newHealth - lastMyHealth
+	lastMyHealth = newHealth
+
+	if delta >= 0 then return end
+
+	local damage = -delta
+	table.insert(selfDamageTimes, { time = tick(), damage = damage })
+
+	if vCycleActive then return end
+	if isFinisherTarget() then return end
+
+	if damage > HEAVY_DAMAGE_THRESHOLD then
+		triggerTeamerPark(PANIC_PARK_TIME)
+	end
+
+	local character = LocalPlayer.Character
+	local humanoid = character and getHumanoid(character)
+	if humanoid and humanoid.Health / math.max(humanoid.MaxHealth, 1) < SELF_HP_RECOVERY_PCT then
+		positionMode = POSITION_BEHIND
+		if SMART_RECOVERY_ENABLED and not recoveryActive and not lmbHeld and not macroActive then
+			setRecoveryMode(true)
+		end
+		return
+	end
+
+	if damage > HEAVY_DAMAGE_THRESHOLD or newHealth < LOW_HEALTH_THRESHOLD then
+		positionMode = POSITION_BEHIND
+	end
+end
+
+local function attachMyHealthWatcher()
+	if myHealthConnection then
+		myHealthConnection:Disconnect()
+		myHealthConnection = nil
+	end
+
+	local character = LocalPlayer.Character
+	local humanoid = character and getHumanoid(character)
+	if not humanoid then return end
+
+	lastMyHealth = humanoid.Health
+	myHealthConnection = humanoid.HealthChanged:Connect(onMyHealthChanged)
+end
+
+local function configureInfinitePrompt(prompt)
+	if not INSTANT_INTERACT_ENABLED then return end
+	if not prompt or not prompt:IsA("ProximityPrompt") then return end
+
+	pcall(function()
+		prompt.HoldDuration = 0
+		prompt.MaxActivationDistance = PROMPT_INTERACT_DISTANCE
+	end)
+end
+
+local function applyInstantInteract()
+	if not INSTANT_INTERACT_ENABLED then return end
+
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		configureInfinitePrompt(descendant)
+	end
+end
+
+local function isPlayingAttackAnimation(character)
+	local humanoid = character and getHumanoid(character)
+	if not humanoid then return false end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then return false end
+
+	for _, animTrack in ipairs(animator:GetPlayingAnimationTracks()) do
+		local anim = animTrack.Animation
+		if anim then
+			for _, attackId in ipairs(ATTACK_ANIMATION_IDS) do
+				if anim.AnimationId == attackId then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function isAttacking(character)
+	if not character then return false end
+
+	local humanoid = getHumanoid(character)
+	if not humanoid then return false end
+
+	if humanoid:GetState() == Enum.HumanoidStateType.Dead then return false end
+
+	return isPlayingAttackAnimation(character)
+end
+
+local function toolMatch(handle)
+	if not handle then return nil end
+
+	local allPlayers = Players:GetPlayers()
+	for i = 1, #allPlayers do
+		local player = allPlayers[i]
+		if player ~= LocalPlayer then
+			local character = player.Character
+			if character then
+				local rightArm = character:FindFirstChild("Right Arm")
+					or character:FindFirstChild("RightHand")
+					or character:FindFirstChild("RightUpperArm")
+				if rightArm then
+					local rightGrip = rightArm:FindFirstChild("RightGrip")
+					if rightGrip and rightGrip:IsA("Weld") and rightGrip.Part1 == handle then
+						return player
+					end
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+local function onAntiVoidChildAdded(child)
+	if not child:IsA("Weld") or child.Name ~= "RightGrip" then return end
+
+	local connectedHandle = child.Part1
+	if not connectedHandle then return end
+
+	local matched = toolMatch(connectedHandle)
+	if matched then
+		pcall(function()
+			local tool = connectedHandle.Parent
+			if tool then tool:Destroy() end
+		end)
+		print("[AntiVoid] " .. tostring(matched) .. " just tried to void you.")
+	end
+end
+
+local function bindAntiVoid(character)
+	if not character then return end
+
+	task.spawn(function()
+		local arm = character:FindFirstChild("Right Arm")
+		if not arm then
+			arm = character:WaitForChild("Right Arm", 3)
+		end
+		if not arm then
+			arm = character:FindFirstChild("RightHand")
+		end
+		if not arm then
+			arm = character:WaitForChild("RightHand", 3)
+		end
+		if not arm then return end
+
+		track(arm.ChildAdded:Connect(onAntiVoidChildAdded))
+	end)
+end
+
+local function bindIdle()
+	track(LocalPlayer.Idled:Connect(function()
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(0, 0, 2, true, nil, 0)
+		end)
+		task.wait(1)
+		pcall(function()
+			VirtualInputManager:SendMouseButtonEvent(0, 0, 2, false, nil, 0)
+		end)
+	end))
+end
+
+local function vCycle()
+	if vCycleActive then
+		vCycleActive = false
+		vCycleVersion += 1
+		return
+	end
+
+	vCycleActive = true
+	teamerParkUntil = 0
+	teamerParkToken += 1
+	resetParticleTracking()
+	recentMovers = {}
+	vCycleVersion += 1
+	local myVersion = vCycleVersion
+
+	task.spawn(function()
+		for round = 1, V_CYCLE_ROUNDS do
+			local list = sortSmart(getCandidates())
+			if #list == 0 then break end
+
+			for _, model in ipairs(list) do
+				if STOPPED or not vCycleActive or vCycleVersion ~= myVersion then
+					return
+				end
+
+				if isValidTarget(model) then
+					setTarget(model)
+					CURRENT_DISTANCE = DEFAULT_DISTANCE
+					CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+					damageReactionCount = 0
+					velocityHistory = {}
+				end
+
+				task.wait(V_CYCLE_DELAY)
+			end
+		end
+
+		if vCycleVersion == myVersion then
+			vCycleActive = false
+		end
+	end)
+end
+
+local function stopEverything()
+	if STOPPED then return end
+
+	STOPPED = true
+	ENABLED = false
+	recoveryActive = false
+	vCycleActive = false
+	vCycleVersion += 1
+	holdBackActive = false
+	holdReleaseToken += 1
+	lmbMissToken += 1
+	macroActive = false
+	macroToken += 1
+	teamerParkUntil = 0
+	teamerParkToken += 1
+	resetParticleTracking()
+	target = nil
+	previousTarget = nil
+	velocityHistory = {}
+	combatStickyUntil = 0
+	cachedHead = nil
+	cachedHeadTarget = nil
+	cachedAwayDir = Vector3.new(0, 0, 1)
+	cachedLookFlat = Vector3.new(0, 0, -1)
+	recentMovers = {}
+
+	pcall(function() if healthConnection then healthConnection:Disconnect() end end)
+	healthConnection = nil
+	watchedHumanoid = nil
+	damageReactionCount = 0
+
+	pcall(function() if myHealthConnection then myHealthConnection:Disconnect() end end)
+	myHealthConnection = nil
+
+	pcall(function() if mainConnection then mainConnection:Disconnect() end end)
+	mainConnection = nil
+
+	pcall(function() if inputConnection then inputConnection:Disconnect() end end)
+	inputConnection = nil
+
+	pcall(function() if inputEndedConnection then inputEndedConnection:Disconnect() end end)
+	inputEndedConnection = nil
+
+	pcall(function() if characterConnection then characterConnection:Disconnect() end end)
+	characterConnection = nil
+
+	for _, connection in ipairs(trackedConnections) do
+		pcall(function() connection:Disconnect() end)
+	end
+	trackedConnections = {}
+
+	pcall(function() if HUD and HUD.gui then HUD.gui:Destroy() end end)
+	HUD = nil
+
+	pcall(function() if helpGui and helpGui.gui then helpGui.gui:Destroy() end end)
+	helpGui = nil
+
+	pcall(function() if sidebar and sidebar.gui then sidebar.gui:Destroy() end end)
+	sidebar = nil
+
+	pcall(function()
+		local pg = LocalPlayer:FindFirstChild("PlayerGui")
+		if pg then
+			local hud = pg:FindFirstChild("ParkCamHUD")
+			if hud then hud:Destroy() end
+			local help = pg:FindFirstChild("ParkCamHelp")
+			if help then help:Destroy() end
+			local sb = pg:FindFirstChild("ParkCamSidebar")
+			if sb then sb:Destroy() end
+		end
+	end)
+
+	pcall(restoreCamera)
+end
+
+local function createHUD()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ParkCamHUD"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 360, 0, 110)
+	frame.Position = UDim2.new(0.5, -180, 0, 16)
+	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+	frame.BackgroundTransparency = 0.25
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Thickness = 1
+	stroke.Parent = frame
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, -20, 0, 26)
+	nameLabel.Position = UDim2.new(0, 10, 0, 8)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = "No Target"
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextSize = 18
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Parent = frame
+
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Size = UDim2.new(1, -20, 0, 16)
+	statusLabel.Position = UDim2.new(0, 10, 0, 30)
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Text = "ENABLED"
+	statusLabel.TextColor3 = Color3.fromRGB(90, 220, 90)
+	statusLabel.TextSize = 12
+	statusLabel.Font = Enum.Font.GothamMedium
+	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+	statusLabel.Parent = frame
+
+	local healthBg = Instance.new("Frame")
+	healthBg.Size = UDim2.new(1, -20, 0, 12)
+	healthBg.Position = UDim2.new(0, 10, 0, 52)
+	healthBg.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
+	healthBg.BorderSizePixel = 0
+	healthBg.Parent = frame
+
+	local healthBgCorner = Instance.new("UICorner")
+	healthBgCorner.CornerRadius = UDim.new(0, 4)
+	healthBgCorner.Parent = healthBg
+
+	local healthFill = Instance.new("Frame")
+	healthFill.Size = UDim2.new(1, 0, 1, 0)
+	healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 80)
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = healthBg
+
+	local healthFillCorner = Instance.new("UICorner")
+	healthFillCorner.CornerRadius = UDim.new(0, 4)
+	healthFillCorner.Parent = healthFill
+
+	local distanceLabel = Instance.new("TextLabel")
+	distanceLabel.Size = UDim2.new(1, -20, 0, 16)
+	distanceLabel.Position = UDim2.new(0, 10, 0, 70)
+	distanceLabel.BackgroundTransparency = 1
+	distanceLabel.Text = "Cam: --"
+	distanceLabel.TextColor3 = Color3.fromRGB(190, 190, 200)
+	distanceLabel.TextSize = 12
+	distanceLabel.Font = Enum.Font.Gotham
+	distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+	distanceLabel.Parent = frame
+
+	local threatLabel = Instance.new("TextLabel")
+	threatLabel.Size = UDim2.new(1, -20, 0, 16)
+	threatLabel.Position = UDim2.new(0, 10, 0, 86)
+	threatLabel.BackgroundTransparency = 1
+	threatLabel.Text = "Threats: 0 | DPS: 0"
+	threatLabel.TextColor3 = Color3.fromRGB(190, 190, 200)
+	threatLabel.TextSize = 12
+	threatLabel.Font = Enum.Font.Gotham
+	threatLabel.TextXAlignment = Enum.TextXAlignment.Left
+	threatLabel.Parent = frame
+
+	return {
+		gui = gui,
+		nameLabel = nameLabel,
+		statusLabel = statusLabel,
+		healthFill = healthFill,
+		distanceLabel = distanceLabel,
+		threatLabel = threatLabel,
+	}
+end
+
+local function createSidebar()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ParkCamSidebar"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 180, 0, 190)
+	frame.Position = UDim2.new(1, -196, 1, -206)
+	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+	frame.BackgroundTransparency = 0.25
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Thickness = 1
+	stroke.Parent = frame
+
+	local function makeRow(yPos, labelText)
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, -16, 0, 26)
+		row.Position = UDim2.new(0, 8, 0, yPos)
+		row.BackgroundTransparency = 1
+		row.Parent = frame
+
+		local key = Instance.new("TextLabel")
+		key.Size = UDim2.new(0.55, 0, 1, 0)
+		key.BackgroundTransparency = 1
+		key.Text = labelText
+		key.TextColor3 = Color3.fromRGB(180, 180, 190)
+		key.TextSize = 13
+		key.Font = Enum.Font.GothamMedium
+		key.TextXAlignment = Enum.TextXAlignment.Left
+		key.Parent = row
+
+		local value = Instance.new("TextLabel")
+		value.Size = UDim2.new(0.45, 0, 1, 0)
+		value.Position = UDim2.new(0.55, 0, 0, 0)
+		value.BackgroundTransparency = 1
+		value.Text = "--"
+		value.TextColor3 = Color3.fromRGB(255, 255, 255)
+		value.TextSize = 13
+		value.Font = Enum.Font.GothamBold
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.Parent = row
+
+		return value
+	end
+
+	local fpsValue = makeRow(8, "FPS")
+	local pingValue = makeRow(38, "Ping")
+	local killsValue = makeRow(68, "Kills")
+	local lowHpValue = makeRow(98, "Under 30 HP")
+	local antiVoidValue = makeRow(128, "AntiVoid")
+	local antiIdleValue = makeRow(158, "AntiIdle")
+
+	return {
+		gui = gui,
+		fpsValue = fpsValue,
+		pingValue = pingValue,
+		killsValue = killsValue,
+		lowHpValue = lowHpValue,
+		antiVoidValue = antiVoidValue,
+		antiIdleValue = antiIdleValue,
+	}
+end
+
+local function getPing()
+	local ok, value = pcall(function()
+		return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+	end)
+	if ok and value then
+		return math.floor(value + 0.5)
+	end
+	return 0
+end
+
+local function updateSidebar(deltaTime)
+	if not sidebar then return end
+
+	fpsFrames += 1
+	fpsAccum += deltaTime
+	if fpsAccum >= 0.5 then
+		fpsDisplay = math.floor(fpsFrames / fpsAccum + 0.5)
+		fpsFrames = 0
+		fpsAccum = 0
+	end
+
+	statsAccum += deltaTime
+	if statsAccum >= 0.25 then
+		statsAccum = 0
+		pingDisplay = getPing()
+		lowHpCount = countLowHpCandidates()
+	end
+
+	sidebar.fpsValue.Text = tostring(fpsDisplay)
+
+	local pingColor
+	if pingDisplay <= 60 then
+		pingColor = Color3.fromRGB(120, 220, 120)
+	elseif pingDisplay <= 120 then
+		pingColor = Color3.fromRGB(230, 200, 60)
+	else
+		pingColor = Color3.fromRGB(230, 90, 90)
+	end
+	sidebar.pingValue.Text = tostring(pingDisplay) .. " ms"
+	sidebar.pingValue.TextColor3 = pingColor
+
+	sidebar.killsValue.Text = tostring(killCount)
+
+	local hpColor
+	if lowHpCount == 0 then
+		hpColor = Color3.fromRGB(180, 180, 190)
+	elseif lowHpCount <= 2 then
+		hpColor = Color3.fromRGB(230, 200, 60)
+	else
+		hpColor = Color3.fromRGB(255, 120, 120)
+	end
+	sidebar.lowHpValue.Text = tostring(lowHpCount)
+	sidebar.lowHpValue.TextColor3 = hpColor
+
+	sidebar.antiVoidValue.Text = "ON"
+	sidebar.antiVoidValue.TextColor3 = Color3.fromRGB(120, 220, 120)
+
+	sidebar.antiIdleValue.Text = "ON"
+	sidebar.antiIdleValue.TextColor3 = Color3.fromRGB(120, 220, 120)
+end
+
+local function createHelpPanel()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ParkCamHelp"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 380, 0, 580)
+	frame.Position = UDim2.new(0, 16, 0.5, -290)
+	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+	frame.BackgroundTransparency = 0.25
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Thickness = 1
+	stroke.Parent = frame
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -20, 0, 22)
+	title.Position = UDim2.new(0, 10, 0, 8)
+	title.BackgroundTransparency = 1
+	title.Text = "Keybinds (F1 to hide)"
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextSize = 14
+	title.Font = Enum.Font.GothamBold
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Parent = frame
+
+	local body = Instance.new("TextLabel")
+	body.Size = UDim2.new(1, -20, 1, -40)
+	body.Position = UDim2.new(0, 10, 0, 32)
+	body.BackgroundTransparency = 1
+	body.Text = table.concat({
+		"LMB  - Punch / hold for reliable hits",
+		"1  - Behind + cam 3.25 + 0.75 back",
+		"2/3/4  - Behind + cam 3.25",
+		"4 + LMB (hold) - Back 4.5 studs",
+		"0  - Toggle victim cam on/off",
+		"9  - Macro: recovery -> 1 -> victim ->",
+		"     recovery -> wait 5s -> 3",
+		"E  - Go to PREVIOUS target",
+		"R  - Go to NEXT target",
+		"M  - Recovery (park + cam on head)",
+		"V  - Toggle V-cycle",
+		"T  - Clear target",
+		"P  - Toggle prediction",
+		"I  - Toggle instant interact",
+		"Y  - Toggle SMART mode",
+		"U  - Cycle position mode",
+		"H  - Toggle HUD",
+		"N  - Toggle sidebar",
+		"O  - Stop script + delete UI",
+		"",
+		"AntiVoid + AntiIdle always on.",
+		"AntiTeamer counts only hostiles",
+		"who are MOVING + facing you.",
+		"Disabled during V-cycle OR when",
+		"target is under 15 HP (finisher).",
+		"Particle recovery: park whenever",
+		"ANY effect on the victim is on.",
+	}, "\n")
+	body.TextColor3 = Color3.fromRGB(210, 210, 220)
+	body.TextSize = 12
+	body.Font = Enum.Font.Gotham
+	body.TextXAlignment = Enum.TextXAlignment.Left
+	body.TextYAlignment = Enum.TextYAlignment.Top
+	body.Parent = frame
+
+	return { gui = gui }
+end
+
+local function updateHUD()
+	if not HUD then return end
+
+	if not isValidTarget(target) then
+		HUD.nameLabel.Text = "No Target"
+		HUD.statusLabel.Text = ENABLED and "ENABLED" or "PAUSED"
+		HUD.statusLabel.TextColor3 = ENABLED
+			and Color3.fromRGB(90, 220, 90)
+			or Color3.fromRGB(220, 200, 90)
+		HUD.healthFill.Size = UDim2.new(0, 0, 1, 0)
+		HUD.distanceLabel.Text = string.format("Cam: %.2f | Below: %.2f | Mode: %s",
+			CURRENT_DISTANCE, CURRENT_BELOW_DISTANCE, positionMode)
+		HUD.threatLabel.Text = string.format("Threats: %d | DPS: %.1f",
+			countNearbyThreats(), getRecentSelfDps())
+		return
+	end
+
+	local humanoid = getHumanoid(target)
+	HUD.nameLabel.Text = getTargetName(target)
+
+	if isFinisherTarget() then
+		HUD.statusLabel.Text = "FINISHER MODE (TEAMER DEF OFF)"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+	elseif vCycleActive then
+		HUD.statusLabel.Text = "V-CYCLE (TEAMER DEF OFF)"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
+	elseif particleRecoveryActive then
+		HUD.statusLabel.Text = "PARTICLE RECOVERY"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(180, 130, 255)
+	elseif tick() < teamerParkUntil then
+		HUD.statusLabel.Text = "ANTI-TEAMER PARK"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+	elseif macroActive then
+		HUD.statusLabel.Text = "MACRO RUNNING"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 100, 200)
+	elseif recoveryActive then
+		HUD.statusLabel.Text = "RECOVERY (PARKED + VICTIM CAM)"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 160, 90)
+	elseif lmbHeld then
+		HUD.statusLabel.Text = "COMBAT (LMB HELD)"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+	elseif tick() < combatStickyUntil then
+		HUD.statusLabel.Text = "COMBAT (MELEE STICKY)"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+	elseif holdBackActive then
+		HUD.statusLabel.Text = "HOLD-BACK ACTIVE"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 200, 90)
+	elseif not ENABLED then
+		HUD.statusLabel.Text = "PAUSED"
+		HUD.statusLabel.TextColor3 = Color3.fromRGB(220, 200, 90)
+	else
+		local camTag = VICTIM_CAM_ENABLED and " (VICTIM CAM)" or " (FREE CAM)"
+		HUD.statusLabel.Text = string.upper(positionMode) .. camTag
+		HUD.statusLabel.TextColor3 = VICTIM_CAM_ENABLED
+			and Color3.fromRGB(255, 140, 200)
+			or (positionMode == POSITION_BELOW
+				and Color3.fromRGB(90, 220, 90)
+				or Color3.fromRGB(120, 220, 255))
+	end
+
+	if humanoid then
+		local pct = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
+		HUD.healthFill.Size = UDim2.new(pct, 0, 1, 0)
+
+		if pct > 0.5 then
+			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 80)
+		elseif pct > 0.25 then
+			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(230, 200, 60)
+		else
+			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(230, 80, 80)
+		end
+	end
+
+	HUD.distanceLabel.Text = string.format("Cam: %.2f | Below: %.2f | DMG: %d/%d",
+		CURRENT_DISTANCE, CURRENT_BELOW_DISTANCE,
+		damageReactionCount, DAMAGE_REACTION_LIMIT)
+
+	HUD.threatLabel.Text = string.format("Threats: %d | Hostiles: %d | Particles: %s",
+		countNearbyThreats(), countHostilePlayers(),
+		cachedVictimHasParticles and "yes" or "no")
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	if player ~= LocalPlayer then
+		if player.Character then
+			addCandidate(player.Character)
+		end
+		track(player.CharacterAdded:Connect(function(character)
+			task.defer(function()
+				for _ = 1, 10 do
+					if isValidTarget(character) then break end
+					task.wait(0.1)
+				end
+				addCandidate(character)
+			end)
+		end))
+	end
+end
+
+track(Players.PlayerAdded:Connect(function(player)
+	track(player.CharacterAdded:Connect(function(character)
+		task.defer(function()
+			for _ = 1, 10 do
+				if isValidTarget(character) then break end
+				task.wait(0.1)
+			end
+			addCandidate(character)
+		end)
+	end))
+end))
+
+track(Players.PlayerRemoving:Connect(function(player)
+	local character = player.Character
+	if character then
+		removeCandidate(character)
+	end
+end))
+
+track(workspace.DescendantAdded:Connect(function(object)
+	if object:IsA("Humanoid") then
+		local model = object.Parent
+		if model and model:IsA("Model") then
+			task.defer(addCandidate, model)
+		end
+	end
+	if object:IsA("BasePart") and object.Name == "HumanoidRootPart" then
+		local model = object.Parent
+		if model and model:IsA("Model") then
+			task.defer(addCandidate, model)
+		end
+	end
+end))
+
+track(workspace.DescendantRemoving:Connect(function(object)
+	if object:IsA("Model") then
+		removeCandidate(object)
+	end
+end))
+
+track(Workspace.DescendantAdded:Connect(function(descendant)
+	configureInfinitePrompt(descendant)
+end))
+
+applyInstantInteract()
+bindIdle()
+
+HUD = createHUD()
+helpGui = createHelpPanel()
+sidebar = createSidebar()
+
+attachMyHealthWatcher()
+bindAntiVoid(LocalPlayer.Character)
+
+characterConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+	target = nil
+	previousTarget = nil
+	CURRENT_DISTANCE = DEFAULT_DISTANCE
+	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
+	vCycleActive = false
+	vCycleVersion += 1
+	recoveryActive = false
+	holdBackActive = false
+	holdReleaseToken += 1
+	lmbMissToken += 1
+	macroActive = false
+	macroToken += 1
+	teamerParkUntil = 0
+	teamerParkToken += 1
+	damageReactionCount = 0
+	positionMode = POSITION_BEHIND
+	velocityHistory = {}
+	combatStickyUntil = 0
+	cachedHead = nil
+	cachedHeadTarget = nil
+	cachedAwayDir = Vector3.new(0, 0, 1)
+	cachedLookFlat = Vector3.new(0, 0, -1)
+	recentMovers = {}
+	resetParticleTracking()
+
+	if healthConnection then
+		healthConnection:Disconnect()
+		healthConnection = nil
+	end
+	watchedHumanoid = nil
+
+	task.wait(0.2)
+	if STOPPED then return end
+
+	attachMyHealthWatcher()
+	bindAntiVoid(newCharacter)
+	restoreCamera()
+end)
+
+mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
+	if STOPPED then return end
+
+	updateHUD()
+	updateSidebar(deltaTime)
+	updateMoverStatus()
+
+	if not ENABLED then
+		attachHealthWatcher(nil)
+		restoreCamera()
+		return
+	end
+
+	if target and isTrulyDead(target) then
+		target = nil
+	end
+
+	if not target then
+		if vCycleActive then
+			attachHealthWatcher(nil)
+			if not VICTIM_CAM_ENABLED then restoreCamera() end
+			return
+		end
+		if not selectClosestTarget() then
+			attachHealthWatcher(nil)
+			if not VICTIM_CAM_ENABLED then restoreCamera() end
+			return
+		end
+	end
+
+	local targetRoot = getRoot(target)
+	if not targetRoot then return end
+
+	attachHealthWatcher(target)
+	updateVelocityHistory(targetRoot)
+
+	checkTeamerThreat()
+
+	local finisher = isFinisherTarget()
+
+	if PARTICLE_RECOVERY_ENABLED and not vCycleActive and not macroActive then
+		if PARTICLE_RECOVERY_SKIPS_FINISHER and finisher then
+			if particleRecoveryActive then
+				particleRecoveryActive = false
+				if recoveryActive then
+					setRecoveryMode(false)
+				end
+			end
+			cachedVictimHasParticles = false
+		else
+			local now = tick()
+
+			if now - lastParticleCheck >= PARTICLE_RESCAN_INTERVAL then
+				lastParticleCheck = now
+				cachedVictimHasParticles = victimHasParticles()
+				if cachedVictimHasParticles then
+					lastParticleSeenAt = now
+				end
+			end
+
+			local particleWindow = (now - lastParticleSeenAt) < PARTICLE_GRACE_PERIOD
+
+			if particleWindow then
+				if not recoveryActive then
+					setRecoveryMode(true)
+				end
+				particleRecoveryActive = true
+			else
+				if particleRecoveryActive then
+					particleRecoveryActive = false
+					if recoveryActive then
+						setRecoveryMode(false)
+					end
+				end
+			end
+		end
+	end
+
+	if not vCycleActive and not finisher and not particleRecoveryActive and SMART_RECOVERY_ENABLED and not macroActive and not lmbHeld then
+		local threats = countNearbyThreats()
+		local dps = getRecentSelfDps()
+
+		if threats >= THREAT_COUNT_TRIGGER and not recoveryActive then
+			setRecoveryMode(true)
+		end
+
+		if dps >= SELF_DPS_RECOVERY_THRESHOLD and not recoveryActive then
+			setRecoveryMode(true)
+		end
+	end
+
+	if not vCycleActive and not finisher and not particleRecoveryActive and RECOVERY_ON_ATTACK and target and isAttacking(target) and not macroActive and not lmbHeld then
+		if not recoveryActive then
+			setRecoveryMode(true)
+		end
+	end
+
+	if lmbHeld and not macroActive then
+		combatStickyUntil = tick() + MELEE_STICKY_DURATION
+	end
+
+	local teamerParking = (not vCycleActive) and (not finisher) and tick() < teamerParkUntil
+	local activeRecovery = (not vCycleActive) and (not finisher) and recoveryActive
+
+	if teamerParking or activeRecovery then
+		parkCharacter()
+	elseif tick() < combatStickyUntil then
+		moveCharacterCombat(targetRoot, deltaTime)
+	else
+		local resolvedMode = resolvePositionMode(targetRoot)
+		if resolvedMode == POSITION_BELOW then
+			moveCharacterBelow(targetRoot, deltaTime)
+		else
+			moveCharacterBehind(targetRoot, deltaTime)
+		end
+	end
+
+	if VICTIM_CAM_ENABLED then
+		attachCameraToVictimHead(targetRoot)
+	else
+		restoreCamera()
+	end
+end)
+
+inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if STOPPED then return end
+
+	if input.KeyCode == Enum.KeyCode.O then
+		stopEverything()
+		return
+	end
+
+	if gameProcessed then return end
+
+	if input.KeyCode == Enum.KeyCode.Zero then
+		VICTIM_CAM_ENABLED = not VICTIM_CAM_ENABLED
+		if not VICTIM_CAM_ENABLED then
+			restoreCamera()
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Nine then
+		runMacro()
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.N then
+		SIDEBAR_ENABLED = not SIDEBAR_ENABLED
+		if sidebar and sidebar.gui then
+			sidebar.gui.Enabled = SIDEBAR_ENABLED
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Four then
+		keyFourHeld = true
+		evaluateHoldBack()
+		positionMode = POSITION_BEHIND
+		if isValidTarget(target) then
+			setDistance(KEY_DISTANCE)
+		end
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		lmbHeld = true
+
+		local hadTarget = isValidTarget(target)
+
+		if hadTarget then
+			combatStickyUntil = tick() + MELEE_STICKY_DURATION
+			local tRoot = getRoot(target)
+			if tRoot then
+				snapToCombat(tRoot)
+			end
+		end
+
+		evaluateHoldBack()
+
+		if not (keyFourHeld and lmbHeld) then
+			if hadTarget then
+				setDistance(LMB_DISTANCE)
+				scheduleLMBMissCheck()
+			else
+				if lockTargetUnderMouse() then
+					combatStickyUntil = tick() + MELEE_STICKY_DURATION
+					local tRoot = getRoot(target)
+					if tRoot then
+						snapToCombat(tRoot)
+					end
+				end
+			end
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.RightShift then
+		ENABLED = not ENABLED
+		if not ENABLED then restoreCamera() end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.M then
+		setRecoveryMode(not recoveryActive)
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.V then
+		vCycle()
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.P then
+		PREDICTION_ENABLED = not PREDICTION_ENABLED
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.I then
+		INSTANT_INTERACT_ENABLED = not INSTANT_INTERACT_ENABLED
+		if INSTANT_INTERACT_ENABLED then
+			applyInstantInteract()
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Y then
+		local nowOn = not (SMART_TARGETING_ENABLED and SMART_POSITION_ENABLED and SMART_RECOVERY_ENABLED and ADAPTIVE_PREDICTION_ENABLED)
+		SMART_TARGETING_ENABLED = nowOn
+		SMART_POSITION_ENABLED = nowOn
+		SMART_RECOVERY_ENABLED = nowOn
+		ADAPTIVE_PREDICTION_ENABLED = nowOn
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.U then
+		if positionMode == POSITION_BELOW then
+			positionMode = POSITION_BEHIND
+		elseif positionMode == POSITION_BEHIND then
+			positionMode = POSITION_AUTO
+		else
+			positionMode = POSITION_BELOW
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.J then
+		RECOVERY_ON_ATTACK = not RECOVERY_ON_ATTACK
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.H then
+		HUD_ENABLED = not HUD_ENABLED
+		if HUD and HUD.gui then
+			HUD.gui.Enabled = HUD_ENABLED
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.F1 then
+		HELP_ENABLED = not HELP_ENABLED
+		if helpGui and helpGui.gui then
+			helpGui.gui.Enabled = HELP_ENABLED
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.E then
+		goToPreviousTarget()
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.R then
+		cycleTarget()
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.T then
+		previousTarget = target
+		target = nil
+		resetParticleTracking()
+		if not VICTIM_CAM_ENABLED then restoreCamera() end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.One then
+		simulateKey1()
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Two
+		or input.KeyCode == Enum.KeyCode.Three
+	then
+		simulateKey3()
+		return
+	end
+end)
+
+inputEndedConnection = UserInputService.InputEnded:Connect(function(input)
+	if STOPPED then return end
+
+	if input.KeyCode == Enum.KeyCode.Four then
+		keyFourHeld = false
+		evaluateHoldBack()
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		lmbHeld = false
+		evaluateHoldBack()
+		return
+	end
+end)
