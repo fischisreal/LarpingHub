@@ -57,7 +57,13 @@ local FINISHER_HP_THRESHOLD = 15
 local REACTION_RECOVERY_ENABLED = true
 local REACTION_RESCAN_INTERVAL = 0.08
 local REACTION_GRACE_PERIOD = 0.3
+local REACTION_SAFETY_TIMEOUT = 2.5
+local REACTION_SAFETY_COOLDOWN = 2.0
 local REACTION_SKIPS_FINISHER = true
+
+local USE_ATTRIBUTE_TRIGGERS = true
+local USE_FOLDER_TRIGGERS = false
+local USE_PARTICLE_TRIGGERS = true
 
 local PARTICLE_WHITELIST = {
 	"attack", "attacking", "hit", "swing", "slash", "stab", "punch",
@@ -65,26 +71,6 @@ local PARTICLE_WHITELIST = {
 	"windup", "wind-up", "ultimate", "ult", "awaken", "awakening",
 	"impact", "crit", "counter", "block", "parry", "dash",
 	"burst", "explosion", "shockwave", "auraattack", "rage",
-}
-
-local VICTIM_INDICATOR_FOLDERS = {
-	"Slow",
-	"Slowed",
-	"Freeze",
-	"Frozen",
-	"DefaultArmor",
-	"M1ComboProtection",
-	"M1Protection",
-	"CombatTag",
-	"InCombat",
-	"Attacking",
-	"Blocking",
-	"Stunned",
-}
-
-local SELF_INDICATOR_FOLDERS = {
-	"Grabbed",
-	"Grabbing",
 }
 
 local VICTIM_ATTACK_ATTRIBUTES = {
@@ -98,8 +84,25 @@ local SELF_DANGER_ATTRIBUTES = {
 	"Grabbed",
 	"Grabbing",
 	"BeingGrabbed",
-	"HoldingM1",
-	"HoldingF",
+	"Frozen",
+	"Stunned",
+}
+
+local VICTIM_INDICATOR_FOLDERS = {
+	"Slow",
+	"Slowed",
+	"Freeze",
+	"Frozen",
+	"CombatTag",
+	"InCombat",
+	"Attacking",
+	"Blocking",
+	"Stunned",
+}
+
+local SELF_INDICATOR_FOLDERS = {
+	"Grabbed",
+	"Grabbing",
 }
 
 local HOLD_BACK_AMOUNT = 4.5
@@ -240,6 +243,8 @@ local cachedReactionReason = ""
 local lastReactionCheck = 0
 local lastReactionSeenAt = 0
 local reactionRecoveryActive = false
+local reactionRecoveryStartedAt = 0
+local reactionCooldownUntil = 0
 
 local recentMovers = {}
 
@@ -329,8 +334,9 @@ local function matchesWhitelist(name)
 end
 
 local function victimHasWhitelistedParticles()
-	if not target then return false end
-	if not isValidTarget(target) then return false end
+	if not USE_PARTICLE_TRIGGERS then return false, "" end
+	if not target then return false, "" end
+	if not isValidTarget(target) then return false, "" end
 
 	for _, obj in ipairs(target:GetDescendants()) do
 		local isEffect =
@@ -345,12 +351,13 @@ local function victimHasWhitelistedParticles()
 		end
 	end
 
-	return false
+	return false, ""
 end
 
 local function victimHasIndicatorFolder()
-	if not target then return false end
-	if not isValidTarget(target) then return false end
+	if not USE_FOLDER_TRIGGERS then return false, "" end
+	if not target then return false, "" end
+	if not isValidTarget(target) then return false, "" end
 
 	for _, folderName in ipairs(VICTIM_INDICATOR_FOLDERS) do
 		if target:FindFirstChild(folderName) then
@@ -358,26 +365,28 @@ local function victimHasIndicatorFolder()
 		end
 	end
 
-	return false
+	return false, ""
 end
 
 local function victimHasAttackAttribute()
-	if not target then return false end
-	if not isValidTarget(target) then return false end
+	if not USE_ATTRIBUTE_TRIGGERS then return false, "" end
+	if not target then return false, "" end
+	if not isValidTarget(target) then return false, "" end
 
 	for _, attrName in ipairs(VICTIM_ATTACK_ATTRIBUTES) do
 		local val = target:GetAttribute(attrName)
 		if val == true then
-			return true, "attr:" .. attrName
+			return true, "victim-attr:" .. attrName
 		end
 	end
 
-	return false
+	return false, ""
 end
 
 local function selfHasIndicatorFolder()
+	if not USE_FOLDER_TRIGGERS then return false, "" end
 	local character = LocalPlayer.Character
-	if not character then return false end
+	if not character then return false, "" end
 
 	for _, folderName in ipairs(SELF_INDICATOR_FOLDERS) do
 		if character:FindFirstChild(folderName) then
@@ -385,12 +394,13 @@ local function selfHasIndicatorFolder()
 		end
 	end
 
-	return false
+	return false, ""
 end
 
 local function selfHasDangerAttribute()
+	if not USE_ATTRIBUTE_TRIGGERS then return false, "" end
 	local character = LocalPlayer.Character
-	if not character then return false end
+	if not character then return false, "" end
 
 	for _, attrName in ipairs(SELF_DANGER_ATTRIBUTES) do
 		local val = character:GetAttribute(attrName)
@@ -399,7 +409,7 @@ local function selfHasDangerAttribute()
 		end
 	end
 
-	return false
+	return false, ""
 end
 
 local function victimIsReacting()
@@ -534,6 +544,8 @@ local function resetReactionTracking()
 	lastReactionCheck = 0
 	lastReactionSeenAt = 0
 	reactionRecoveryActive = false
+	reactionRecoveryStartedAt = 0
+	reactionCooldownUntil = 0
 end
 
 local function setTarget(newTarget)
@@ -1681,8 +1693,8 @@ local function createHUD()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 480, 0, 44)
-	frame.Position = UDim2.new(0.5, -240, 0, 18)
+	frame.Size = UDim2.new(0, 560, 0, 44)
+	frame.Position = UDim2.new(0.5, -280, 0, 18)
 	frame.BackgroundColor3 = BG_DARK
 	frame.BackgroundTransparency = 0.15
 	frame.BorderSizePixel = 0
@@ -1710,7 +1722,7 @@ local function createHUD()
 	accentCorner.Parent = accentBar
 
 	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(0, 220, 1, 0)
+	nameLabel.Size = UDim2.new(0, 190, 1, 0)
 	nameLabel.Position = UDim2.new(0, 18, 0, 0)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Text = "No Target"
@@ -1722,8 +1734,8 @@ local function createHUD()
 	nameLabel.Parent = frame
 
 	local healthTrack = Instance.new("Frame")
-	healthTrack.Size = UDim2.new(0, 110, 0, 6)
-	healthTrack.Position = UDim2.new(1, -200, 0.5, 0)
+	healthTrack.Size = UDim2.new(0, 100, 0, 6)
+	healthTrack.Position = UDim2.new(0, 220, 0.5, 0)
 	healthTrack.BackgroundColor3 = BG_LIGHT
 	healthTrack.BorderSizePixel = 0
 	healthTrack.Parent = frame
@@ -1741,6 +1753,18 @@ local function createHUD()
 	local hfCorner = Instance.new("UICorner")
 	hfCorner.CornerRadius = UDim.new(1, 0)
 	hfCorner.Parent = healthFill
+
+	local reasonLabel = Instance.new("TextLabel")
+	reasonLabel.Size = UDim2.new(0, 130, 1, 0)
+	reasonLabel.Position = UDim2.new(0, 330, 0, 0)
+	reasonLabel.BackgroundTransparency = 1
+	reasonLabel.Text = ""
+	reasonLabel.TextColor3 = TEXT_DIM
+	reasonLabel.TextSize = 11
+	reasonLabel.Font = Enum.Font.GothamMedium
+	reasonLabel.TextXAlignment = Enum.TextXAlignment.Left
+	reasonLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	reasonLabel.Parent = frame
 
 	local statusPill = Instance.new("Frame")
 	statusPill.Size = UDim2.new(0, 82, 0, 22)
@@ -1768,6 +1792,7 @@ local function createHUD()
 		healthFill = healthFill,
 		statusLabel = statusLabel,
 		statusPill = statusPill,
+		reasonLabel = reasonLabel,
 	}
 end
 
@@ -1904,8 +1929,8 @@ local function createHelpPanel()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 340, 0, 480)
-	frame.Position = UDim2.new(0, 20, 0.5, -240)
+	frame.Size = UDim2.new(0, 340, 0, 500)
+	frame.Position = UDim2.new(0, 20, 0.5, -250)
 	frame.BackgroundColor3 = BG_DARK
 	frame.BackgroundTransparency = 0.12
 	frame.BorderSizePixel = 0
@@ -1990,16 +2015,18 @@ local function createHelpPanel()
 	})
 
 	y = section(y, "REACTION TRIGGERS", {
-		"Victim attributes: HoldingM1, HoldingF,",
-		"Blocking, Ulted",
-		"Self attributes: Grabbed, Grabbing,",
-		"BeingGrabbed, HoldingM1, HoldingF",
-		"Victim folders: Slow, Freeze, Frozen,",
-		"DefaultArmor, M1ComboProtection,",
-		"M1Protection, CombatTag, InCombat,",
-		"Attacking, Blocking, Stunned",
-		"Self folders: Grabbed, Grabbing",
-		"Whitelisted attack particles on victim",
+		"Victim attributes (on):",
+		"   HoldingM1 / HoldingF / Blocking / Ulted",
+		"Self attributes (on):",
+		"   Grabbed / Grabbing / BeingGrabbed /",
+		"   Frozen / Stunned",
+		"Attack particles (on):",
+		"   Whitelisted keywords only",
+		"Folder triggers (off):",
+		"   Enable manually if needed",
+		"",
+		"Safety: force-release after 2.5s + 2s",
+		"cooldown prevents permanent lock.",
 	})
 
 	return { gui = gui }
@@ -2013,6 +2040,7 @@ local function updateHUD()
 		HUD.healthFill.Size = UDim2.new(0, 0, 1, 0)
 		HUD.statusLabel.Text = ENABLED and "READY" or "PAUSED"
 		HUD.statusLabel.TextColor3 = ENABLED and OK or WARN
+		HUD.reasonLabel.Text = ""
 		return
 	end
 
@@ -2021,6 +2049,7 @@ local function updateHUD()
 
 	local statusText
 	local statusColor
+	local reasonText = ""
 
 	if isFinisherTarget() then
 		statusText = "FINISH"
@@ -2031,6 +2060,7 @@ local function updateHUD()
 	elseif reactionRecoveryActive then
 		statusText = "REACT"
 		statusColor = SPECIAL
+		reasonText = cachedReactionReason
 	elseif tick() < teamerParkUntil then
 		statusText = "PARK"
 		statusColor = BAD
@@ -2059,6 +2089,7 @@ local function updateHUD()
 
 	HUD.statusLabel.Text = statusText
 	HUD.statusLabel.TextColor3 = statusColor
+	HUD.reasonLabel.Text = reasonText
 
 	if humanoid then
 		local pct = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
@@ -2251,6 +2282,7 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 	checkTeamerThreat()
 
 	local finisher = isFinisherTarget()
+	local now = tick()
 
 	if REACTION_RECOVERY_ENABLED and not vCycleActive and not macroActive then
 		if REACTION_SKIPS_FINISHER and finisher then
@@ -2262,9 +2294,15 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 			end
 			cachedVictimReacting = false
 			cachedSelfReacting = false
+			cachedReactionReason = ""
+		elseif now < reactionCooldownUntil then
+			if reactionRecoveryActive then
+				reactionRecoveryActive = false
+				if recoveryActive then
+					setRecoveryMode(false)
+				end
+			end
 		else
-			local now = tick()
-
 			if now - lastReactionCheck >= REACTION_RESCAN_INTERVAL then
 				lastReactionCheck = now
 
@@ -2288,7 +2326,21 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 				if not recoveryActive then
 					setRecoveryMode(true)
 				end
-				reactionRecoveryActive = true
+
+				if not reactionRecoveryActive then
+					reactionRecoveryActive = true
+					reactionRecoveryStartedAt = now
+				end
+
+				if now - reactionRecoveryStartedAt > REACTION_SAFETY_TIMEOUT then
+					reactionRecoveryActive = false
+					reactionCooldownUntil = now + REACTION_SAFETY_COOLDOWN
+					lastReactionSeenAt = 0
+					cachedReactionReason = ""
+					if recoveryActive then
+						setRecoveryMode(false)
+					end
+				end
 			else
 				if reactionRecoveryActive then
 					reactionRecoveryActive = false
