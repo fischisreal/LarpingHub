@@ -4,6 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local Stats = game:GetService("Stats")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -53,10 +54,53 @@ local PANIC_PARK_TIME = 2
 
 local FINISHER_HP_THRESHOLD = 15
 
-local PARTICLE_RECOVERY_ENABLED = true
-local PARTICLE_RESCAN_INTERVAL = 0.1
-local PARTICLE_GRACE_PERIOD = 0.35
-local PARTICLE_RECOVERY_SKIPS_FINISHER = true
+local REACTION_RECOVERY_ENABLED = true
+local REACTION_RESCAN_INTERVAL = 0.08
+local REACTION_GRACE_PERIOD = 0.3
+local REACTION_SKIPS_FINISHER = true
+
+local PARTICLE_WHITELIST = {
+	"attack", "attacking", "hit", "swing", "slash", "stab", "punch",
+	"combo", "m1", "m2", "skill", "cast", "charge", "charging",
+	"windup", "wind-up", "ultimate", "ult", "awaken", "awakening",
+	"impact", "crit", "counter", "block", "parry", "dash",
+	"burst", "explosion", "shockwave", "auraattack", "rage",
+}
+
+local VICTIM_INDICATOR_FOLDERS = {
+	"Slow",
+	"Slowed",
+	"Freeze",
+	"Frozen",
+	"DefaultArmor",
+	"M1ComboProtection",
+	"M1Protection",
+	"CombatTag",
+	"InCombat",
+	"Attacking",
+	"Blocking",
+	"Stunned",
+}
+
+local SELF_INDICATOR_FOLDERS = {
+	"Grabbed",
+	"Grabbing",
+}
+
+local VICTIM_ATTACK_ATTRIBUTES = {
+	"HoldingM1",
+	"HoldingF",
+	"Blocking",
+	"Ulted",
+}
+
+local SELF_DANGER_ATTRIBUTES = {
+	"Grabbed",
+	"Grabbing",
+	"BeingGrabbed",
+	"HoldingM1",
+	"HoldingF",
+}
 
 local HOLD_BACK_AMOUNT = 4.5
 local HOLD_RELEASE_DELAY = 2
@@ -96,7 +140,7 @@ local V_CYCLE_ROUNDS = 2
 local V_CYCLE_DELAY = 0.35
 
 local HUD_ENABLED = true
-local HELP_ENABLED = true
+local HELP_ENABLED = false
 
 local PREDICTION_ENABLED = true
 local PREDICTION_STRENGTH = 1.0
@@ -118,6 +162,19 @@ local ATTACK_ANIMATION_IDS = {
 	"rbxassetid://1234567892",
 }
 
+local ACCENT = Color3.fromRGB(120, 180, 255)
+local ACCENT_ALT = Color3.fromRGB(200, 130, 255)
+local BG_DARK = Color3.fromRGB(16, 16, 20)
+local BG_MID = Color3.fromRGB(24, 24, 30)
+local BG_LIGHT = Color3.fromRGB(36, 36, 44)
+local TEXT_DIM = Color3.fromRGB(160, 160, 175)
+local TEXT = Color3.fromRGB(240, 240, 245)
+local OK = Color3.fromRGB(110, 210, 140)
+local WARN = Color3.fromRGB(240, 200, 90)
+local BAD = Color3.fromRGB(240, 100, 100)
+local INFO = Color3.fromRGB(140, 180, 255)
+local SPECIAL = Color3.fromRGB(200, 130, 255)
+
 local target
 local previousTarget
 local candidates = {}
@@ -135,6 +192,7 @@ local vCycleVersion = 0
 local HUD
 local helpGui
 local sidebar
+local loadingScreen
 
 local healthConnection = nil
 local watchedHumanoid = nil
@@ -176,10 +234,12 @@ local teamerParkToken = 0
 local cachedAwayDir = Vector3.new(0, 0, 1)
 local cachedLookFlat = Vector3.new(0, 0, -1)
 
-local cachedVictimHasParticles = false
-local lastParticleCheck = 0
-local lastParticleSeenAt = 0
-local particleRecoveryActive = false
+local cachedVictimReacting = false
+local cachedSelfReacting = false
+local cachedReactionReason = ""
+local lastReactionCheck = 0
+local lastReactionSeenAt = 0
+local reactionRecoveryActive = false
 
 local recentMovers = {}
 
@@ -250,7 +310,25 @@ local function isFinisherTarget()
 	return humanoid.Health <= FINISHER_HP_THRESHOLD
 end
 
-local function victimHasParticles()
+local function isUnderAccessory(obj)
+	if not obj then return false end
+	if obj:FindFirstAncestorOfClass("Accessory") then return true end
+	if obj:FindFirstAncestorOfClass("Accoutrement") then return true end
+	return false
+end
+
+local function matchesWhitelist(name)
+	if not name then return false end
+	local lower = string.lower(name)
+	for _, keyword in ipairs(PARTICLE_WHITELIST) do
+		if string.find(lower, keyword, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+local function victimHasWhitelistedParticles()
 	if not target then return false end
 	if not isValidTarget(target) then return false end
 
@@ -259,16 +337,92 @@ local function victimHasParticles()
 			obj:IsA("ParticleEmitter")
 			or obj:IsA("Trail")
 			or obj:IsA("Beam")
-			or obj:IsA("Fire")
-			or obj:IsA("Smoke")
-			or obj:IsA("Sparkles")
 
 		if isEffect and obj.Enabled then
-			return true
+			if not isUnderAccessory(obj) and matchesWhitelist(obj.Name) then
+				return true, "particle:" .. obj.Name
+			end
 		end
 	end
 
 	return false
+end
+
+local function victimHasIndicatorFolder()
+	if not target then return false end
+	if not isValidTarget(target) then return false end
+
+	for _, folderName in ipairs(VICTIM_INDICATOR_FOLDERS) do
+		if target:FindFirstChild(folderName) then
+			return true, "folder:" .. folderName
+		end
+	end
+
+	return false
+end
+
+local function victimHasAttackAttribute()
+	if not target then return false end
+	if not isValidTarget(target) then return false end
+
+	for _, attrName in ipairs(VICTIM_ATTACK_ATTRIBUTES) do
+		local val = target:GetAttribute(attrName)
+		if val == true then
+			return true, "attr:" .. attrName
+		end
+	end
+
+	return false
+end
+
+local function selfHasIndicatorFolder()
+	local character = LocalPlayer.Character
+	if not character then return false end
+
+	for _, folderName in ipairs(SELF_INDICATOR_FOLDERS) do
+		if character:FindFirstChild(folderName) then
+			return true, "self-folder:" .. folderName
+		end
+	end
+
+	return false
+end
+
+local function selfHasDangerAttribute()
+	local character = LocalPlayer.Character
+	if not character then return false end
+
+	for _, attrName in ipairs(SELF_DANGER_ATTRIBUTES) do
+		local val = character:GetAttribute(attrName)
+		if val == true then
+			return true, "self-attr:" .. attrName
+		end
+	end
+
+	return false
+end
+
+local function victimIsReacting()
+	local hit, reason = victimHasAttackAttribute()
+	if hit then return true, reason end
+
+	hit, reason = victimHasIndicatorFolder()
+	if hit then return true, reason end
+
+	hit, reason = victimHasWhitelistedParticles()
+	if hit then return true, reason end
+
+	return false, ""
+end
+
+local function selfIsReacting()
+	local hit, reason = selfHasDangerAttribute()
+	if hit then return true, reason end
+
+	hit, reason = selfHasIndicatorFolder()
+	if hit then return true, reason end
+
+	return false, ""
 end
 
 local function addCandidate(model)
@@ -368,22 +522,24 @@ end
 local function getTargetName(model)
 	local player = Players:GetPlayerFromCharacter(model)
 	if player then
-		return player.DisplayName .. " (@" .. player.Name .. ")"
+		return player.DisplayName
 	end
 	return model.Name
 end
 
-local function resetParticleTracking()
-	cachedVictimHasParticles = false
-	lastParticleCheck = 0
-	lastParticleSeenAt = 0
-	particleRecoveryActive = false
+local function resetReactionTracking()
+	cachedVictimReacting = false
+	cachedSelfReacting = false
+	cachedReactionReason = ""
+	lastReactionCheck = 0
+	lastReactionSeenAt = 0
+	reactionRecoveryActive = false
 end
 
 local function setTarget(newTarget)
 	if newTarget ~= target then
 		previousTarget = target
-		resetParticleTracking()
+		resetReactionTracking()
 	end
 	target = newTarget
 end
@@ -1214,7 +1370,6 @@ local function onAntiVoidChildAdded(child)
 			local tool = connectedHandle.Parent
 			if tool then tool:Destroy() end
 		end)
-		print("[AntiVoid] " .. tostring(matched) .. " just tried to void you.")
 	end
 end
 
@@ -1260,7 +1415,7 @@ local function vCycle()
 	vCycleActive = true
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	resetParticleTracking()
+	resetReactionTracking()
 	recentMovers = {}
 	vCycleVersion += 1
 	local myVersion = vCycleVersion
@@ -1308,7 +1463,7 @@ local function stopEverything()
 	macroToken += 1
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	resetParticleTracking()
+	resetReactionTracking()
 	target = nil
 	previousTarget = nil
 	velocityHistory = {}
@@ -1353,19 +1508,169 @@ local function stopEverything()
 	pcall(function() if sidebar and sidebar.gui then sidebar.gui:Destroy() end end)
 	sidebar = nil
 
+	pcall(function() if loadingScreen and loadingScreen.gui then loadingScreen.gui:Destroy() end end)
+	loadingScreen = nil
+
 	pcall(function()
 		local pg = LocalPlayer:FindFirstChild("PlayerGui")
 		if pg then
-			local hud = pg:FindFirstChild("ParkCamHUD")
-			if hud then hud:Destroy() end
-			local help = pg:FindFirstChild("ParkCamHelp")
-			if help then help:Destroy() end
-			local sb = pg:FindFirstChild("ParkCamSidebar")
-			if sb then sb:Destroy() end
+			for _, name in ipairs({ "ParkCamHUD", "ParkCamHelp", "ParkCamSidebar", "ParkCamLoading" }) do
+				local ui = pg:FindFirstChild(name)
+				if ui then ui:Destroy() end
+			end
 		end
 	end)
 
 	pcall(restoreCamera)
+end
+
+local function createLoadingScreen()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ParkCamLoading"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 1000
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local backdrop = Instance.new("Frame")
+	backdrop.Size = UDim2.new(1, 0, 1, 0)
+	backdrop.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
+	backdrop.BorderSizePixel = 0
+	backdrop.Parent = gui
+
+	local card = Instance.new("Frame")
+	card.Size = UDim2.new(0, 420, 0, 200)
+	card.Position = UDim2.new(0.5, -210, 0.5, -100)
+	card.BackgroundColor3 = BG_DARK
+	card.BackgroundTransparency = 0.1
+	card.BorderSizePixel = 0
+	card.Parent = backdrop
+
+	local cardCorner = Instance.new("UICorner")
+	cardCorner.CornerRadius = UDim.new(0, 14)
+	cardCorner.Parent = card
+
+	local cardStroke = Instance.new("UIStroke")
+	cardStroke.Color = ACCENT
+	cardStroke.Thickness = 1.2
+	cardStroke.Transparency = 0.4
+	cardStroke.Parent = card
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -32, 0, 32)
+	title.Position = UDim2.new(0, 16, 0, 22)
+	title.BackgroundTransparency = 1
+	title.Text = "PARK CAM"
+	title.TextColor3 = TEXT
+	title.TextSize = 26
+	title.Font = Enum.Font.GothamBlack
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Parent = card
+
+	local subtitle = Instance.new("TextLabel")
+	subtitle.Size = UDim2.new(1, -32, 0, 16)
+	subtitle.Position = UDim2.new(0, 16, 0, 56)
+	subtitle.BackgroundTransparency = 1
+	subtitle.Text = "booting modules"
+	subtitle.TextColor3 = ACCENT
+	subtitle.TextSize = 12
+	subtitle.Font = Enum.Font.GothamMedium
+	subtitle.TextXAlignment = Enum.TextXAlignment.Left
+	subtitle.Parent = card
+
+	local barBg = Instance.new("Frame")
+	barBg.Size = UDim2.new(1, -32, 0, 8)
+	barBg.Position = UDim2.new(0, 16, 0, 100)
+	barBg.BackgroundColor3 = BG_LIGHT
+	barBg.BorderSizePixel = 0
+	barBg.Parent = card
+
+	local barBgCorner = Instance.new("UICorner")
+	barBgCorner.CornerRadius = UDim.new(0, 4)
+	barBgCorner.Parent = barBg
+
+	local barFill = Instance.new("Frame")
+	barFill.Size = UDim2.new(0, 0, 1, 0)
+	barFill.BackgroundColor3 = ACCENT
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBg
+
+	local barFillCorner = Instance.new("UICorner")
+	barFillCorner.CornerRadius = UDim.new(0, 4)
+	barFillCorner.Parent = barFill
+
+	local barGlow = Instance.new("UIStroke")
+	barGlow.Color = ACCENT
+	barGlow.Thickness = 1
+	barGlow.Transparency = 0.4
+	barGlow.Parent = barFill
+
+	local pctLabel = Instance.new("TextLabel")
+	pctLabel.Size = UDim2.new(1, -32, 0, 16)
+	pctLabel.Position = UDim2.new(0, 16, 0, 120)
+	pctLabel.BackgroundTransparency = 1
+	pctLabel.Text = "0%"
+	pctLabel.TextColor3 = TEXT_DIM
+	pctLabel.TextSize = 11
+	pctLabel.Font = Enum.Font.Gotham
+	pctLabel.TextXAlignment = Enum.TextXAlignment.Left
+	pctLabel.Parent = card
+
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Size = UDim2.new(1, -32, 0, 22)
+	statusLabel.Position = UDim2.new(0, 16, 0, 148)
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Text = "Initializing..."
+	statusLabel.TextColor3 = TEXT
+	statusLabel.TextSize = 13
+	statusLabel.Font = Enum.Font.GothamMedium
+	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+	statusLabel.Parent = card
+
+	local function setProgress(pct, text)
+		pct = math.clamp(pct, 0, 1)
+		TweenService:Create(
+			barFill,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{ Size = UDim2.new(pct, 0, 1, 0) }
+		):Play()
+		pctLabel.Text = string.format("%d%%", math.floor(pct * 100))
+		if text then
+			statusLabel.Text = text
+		end
+	end
+
+	local function destroy()
+		TweenService:Create(
+			backdrop,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }
+		):Play()
+
+		for _, item in ipairs(card:GetDescendants()) do
+			if item:IsA("TextLabel") or item:IsA("Frame") or item:IsA("UIStroke") then
+				pcall(function()
+					TweenService:Create(
+						item,
+						TweenInfo.new(0.3),
+						{ BackgroundTransparency = 1, TextTransparency = 1, Transparency = 1 }
+					):Play()
+				end)
+			end
+		end
+
+		task.delay(0.4, function()
+			if gui and gui.Parent then
+				gui:Destroy()
+			end
+		end)
+	end
+
+	return {
+		gui = gui,
+		setProgress = setProgress,
+		destroy = destroy,
+	}
 end
 
 local function createHUD()
@@ -1376,10 +1681,10 @@ local function createHUD()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 360, 0, 110)
-	frame.Position = UDim2.new(0.5, -180, 0, 16)
-	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-	frame.BackgroundTransparency = 0.25
+	frame.Size = UDim2.new(0, 480, 0, 44)
+	frame.Position = UDim2.new(0.5, -240, 0, 18)
+	frame.BackgroundColor3 = BG_DARK
+	frame.BackgroundTransparency = 0.15
 	frame.BorderSizePixel = 0
 	frame.Parent = gui
 
@@ -1388,82 +1693,81 @@ local function createHUD()
 	corner.Parent = frame
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Color = BG_LIGHT
 	stroke.Thickness = 1
+	stroke.Transparency = 0.3
 	stroke.Parent = frame
 
+	local accentBar = Instance.new("Frame")
+	accentBar.Size = UDim2.new(0, 3, 1, -16)
+	accentBar.Position = UDim2.new(0, 6, 0, 8)
+	accentBar.BackgroundColor3 = ACCENT
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = frame
+
+	local accentCorner = Instance.new("UICorner")
+	accentCorner.CornerRadius = UDim.new(1, 0)
+	accentCorner.Parent = accentBar
+
 	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(1, -20, 0, 26)
-	nameLabel.Position = UDim2.new(0, 10, 0, 8)
+	nameLabel.Size = UDim2.new(0, 220, 1, 0)
+	nameLabel.Position = UDim2.new(0, 18, 0, 0)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Text = "No Target"
-	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	nameLabel.TextSize = 18
+	nameLabel.TextColor3 = TEXT
+	nameLabel.TextSize = 15
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	nameLabel.Parent = frame
 
-	local statusLabel = Instance.new("TextLabel")
-	statusLabel.Size = UDim2.new(1, -20, 0, 16)
-	statusLabel.Position = UDim2.new(0, 10, 0, 30)
-	statusLabel.BackgroundTransparency = 1
-	statusLabel.Text = "ENABLED"
-	statusLabel.TextColor3 = Color3.fromRGB(90, 220, 90)
-	statusLabel.TextSize = 12
-	statusLabel.Font = Enum.Font.GothamMedium
-	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-	statusLabel.Parent = frame
+	local healthTrack = Instance.new("Frame")
+	healthTrack.Size = UDim2.new(0, 110, 0, 6)
+	healthTrack.Position = UDim2.new(1, -200, 0.5, 0)
+	healthTrack.BackgroundColor3 = BG_LIGHT
+	healthTrack.BorderSizePixel = 0
+	healthTrack.Parent = frame
 
-	local healthBg = Instance.new("Frame")
-	healthBg.Size = UDim2.new(1, -20, 0, 12)
-	healthBg.Position = UDim2.new(0, 10, 0, 52)
-	healthBg.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
-	healthBg.BorderSizePixel = 0
-	healthBg.Parent = frame
-
-	local healthBgCorner = Instance.new("UICorner")
-	healthBgCorner.CornerRadius = UDim.new(0, 4)
-	healthBgCorner.Parent = healthBg
+	local htCorner = Instance.new("UICorner")
+	htCorner.CornerRadius = UDim.new(1, 0)
+	htCorner.Parent = healthTrack
 
 	local healthFill = Instance.new("Frame")
 	healthFill.Size = UDim2.new(1, 0, 1, 0)
-	healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 80)
+	healthFill.BackgroundColor3 = OK
 	healthFill.BorderSizePixel = 0
-	healthFill.Parent = healthBg
+	healthFill.Parent = healthTrack
 
-	local healthFillCorner = Instance.new("UICorner")
-	healthFillCorner.CornerRadius = UDim.new(0, 4)
-	healthFillCorner.Parent = healthFill
+	local hfCorner = Instance.new("UICorner")
+	hfCorner.CornerRadius = UDim.new(1, 0)
+	hfCorner.Parent = healthFill
 
-	local distanceLabel = Instance.new("TextLabel")
-	distanceLabel.Size = UDim2.new(1, -20, 0, 16)
-	distanceLabel.Position = UDim2.new(0, 10, 0, 70)
-	distanceLabel.BackgroundTransparency = 1
-	distanceLabel.Text = "Cam: --"
-	distanceLabel.TextColor3 = Color3.fromRGB(190, 190, 200)
-	distanceLabel.TextSize = 12
-	distanceLabel.Font = Enum.Font.Gotham
-	distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
-	distanceLabel.Parent = frame
+	local statusPill = Instance.new("Frame")
+	statusPill.Size = UDim2.new(0, 82, 0, 22)
+	statusPill.Position = UDim2.new(1, -88, 0.5, -11)
+	statusPill.BackgroundColor3 = BG_LIGHT
+	statusPill.BorderSizePixel = 0
+	statusPill.Parent = frame
 
-	local threatLabel = Instance.new("TextLabel")
-	threatLabel.Size = UDim2.new(1, -20, 0, 16)
-	threatLabel.Position = UDim2.new(0, 10, 0, 86)
-	threatLabel.BackgroundTransparency = 1
-	threatLabel.Text = "Threats: 0 | DPS: 0"
-	threatLabel.TextColor3 = Color3.fromRGB(190, 190, 200)
-	threatLabel.TextSize = 12
-	threatLabel.Font = Enum.Font.Gotham
-	threatLabel.TextXAlignment = Enum.TextXAlignment.Left
-	threatLabel.Parent = frame
+	local spCorner = Instance.new("UICorner")
+	spCorner.CornerRadius = UDim.new(1, 0)
+	spCorner.Parent = statusPill
+
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Size = UDim2.new(1, 0, 1, 0)
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Text = "READY"
+	statusLabel.TextColor3 = OK
+	statusLabel.TextSize = 11
+	statusLabel.Font = Enum.Font.GothamBold
+	statusLabel.Parent = statusPill
 
 	return {
 		gui = gui,
 		nameLabel = nameLabel,
-		statusLabel = statusLabel,
 		healthFill = healthFill,
-		distanceLabel = distanceLabel,
-		threatLabel = threatLabel,
+		statusLabel = statusLabel,
+		statusPill = statusPill,
 	}
 end
 
@@ -1475,10 +1779,10 @@ local function createSidebar()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 180, 0, 190)
-	frame.Position = UDim2.new(1, -196, 1, -206)
-	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-	frame.BackgroundTransparency = 0.25
+	frame.Size = UDim2.new(0, 148, 0, 118)
+	frame.Position = UDim2.new(1, -164, 1, -134)
+	frame.BackgroundColor3 = BG_DARK
+	frame.BackgroundTransparency = 0.15
 	frame.BorderSizePixel = 0
 	frame.Parent = gui
 
@@ -1487,14 +1791,15 @@ local function createSidebar()
 	corner.Parent = frame
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Color = BG_LIGHT
 	stroke.Thickness = 1
+	stroke.Transparency = 0.3
 	stroke.Parent = frame
 
 	local function makeRow(yPos, labelText)
 		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, -16, 0, 26)
-		row.Position = UDim2.new(0, 8, 0, yPos)
+		row.Size = UDim2.new(1, -20, 0, 20)
+		row.Position = UDim2.new(0, 10, 0, yPos)
 		row.BackgroundTransparency = 1
 		row.Parent = frame
 
@@ -1502,8 +1807,8 @@ local function createSidebar()
 		key.Size = UDim2.new(0.55, 0, 1, 0)
 		key.BackgroundTransparency = 1
 		key.Text = labelText
-		key.TextColor3 = Color3.fromRGB(180, 180, 190)
-		key.TextSize = 13
+		key.TextColor3 = TEXT_DIM
+		key.TextSize = 11
 		key.Font = Enum.Font.GothamMedium
 		key.TextXAlignment = Enum.TextXAlignment.Left
 		key.Parent = row
@@ -1513,8 +1818,8 @@ local function createSidebar()
 		value.Position = UDim2.new(0.55, 0, 0, 0)
 		value.BackgroundTransparency = 1
 		value.Text = "--"
-		value.TextColor3 = Color3.fromRGB(255, 255, 255)
-		value.TextSize = 13
+		value.TextColor3 = TEXT
+		value.TextSize = 12
 		value.Font = Enum.Font.GothamBold
 		value.TextXAlignment = Enum.TextXAlignment.Right
 		value.Parent = row
@@ -1522,12 +1827,10 @@ local function createSidebar()
 		return value
 	end
 
-	local fpsValue = makeRow(8, "FPS")
+	local fpsValue = makeRow(12, "FPS")
 	local pingValue = makeRow(38, "Ping")
-	local killsValue = makeRow(68, "Kills")
-	local lowHpValue = makeRow(98, "Under 30 HP")
-	local antiVoidValue = makeRow(128, "AntiVoid")
-	local antiIdleValue = makeRow(158, "AntiIdle")
+	local killsValue = makeRow(64, "Kills")
+	local lowHpValue = makeRow(90, "Low HP")
 
 	return {
 		gui = gui,
@@ -1535,8 +1838,6 @@ local function createSidebar()
 		pingValue = pingValue,
 		killsValue = killsValue,
 		lowHpValue = lowHpValue,
-		antiVoidValue = antiVoidValue,
-		antiIdleValue = antiIdleValue,
 	}
 end
 
@@ -1572,33 +1873,27 @@ local function updateSidebar(deltaTime)
 
 	local pingColor
 	if pingDisplay <= 60 then
-		pingColor = Color3.fromRGB(120, 220, 120)
+		pingColor = OK
 	elseif pingDisplay <= 120 then
-		pingColor = Color3.fromRGB(230, 200, 60)
+		pingColor = WARN
 	else
-		pingColor = Color3.fromRGB(230, 90, 90)
+		pingColor = BAD
 	end
-	sidebar.pingValue.Text = tostring(pingDisplay) .. " ms"
+	sidebar.pingValue.Text = tostring(pingDisplay) .. "ms"
 	sidebar.pingValue.TextColor3 = pingColor
 
 	sidebar.killsValue.Text = tostring(killCount)
 
 	local hpColor
 	if lowHpCount == 0 then
-		hpColor = Color3.fromRGB(180, 180, 190)
+		hpColor = TEXT
 	elseif lowHpCount <= 2 then
-		hpColor = Color3.fromRGB(230, 200, 60)
+		hpColor = WARN
 	else
-		hpColor = Color3.fromRGB(255, 120, 120)
+		hpColor = BAD
 	end
 	sidebar.lowHpValue.Text = tostring(lowHpCount)
 	sidebar.lowHpValue.TextColor3 = hpColor
-
-	sidebar.antiVoidValue.Text = "ON"
-	sidebar.antiVoidValue.TextColor3 = Color3.fromRGB(120, 220, 120)
-
-	sidebar.antiIdleValue.Text = "ON"
-	sidebar.antiIdleValue.TextColor3 = Color3.fromRGB(120, 220, 120)
 end
 
 local function createHelpPanel()
@@ -1609,72 +1904,103 @@ local function createHelpPanel()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 380, 0, 580)
-	frame.Position = UDim2.new(0, 16, 0.5, -290)
-	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-	frame.BackgroundTransparency = 0.25
+	frame.Size = UDim2.new(0, 340, 0, 480)
+	frame.Position = UDim2.new(0, 20, 0.5, -240)
+	frame.BackgroundColor3 = BG_DARK
+	frame.BackgroundTransparency = 0.12
 	frame.BorderSizePixel = 0
 	frame.Parent = gui
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
+	corner.CornerRadius = UDim.new(0, 12)
 	corner.Parent = frame
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(60, 60, 70)
+	stroke.Color = BG_LIGHT
 	stroke.Thickness = 1
+	stroke.Transparency = 0.3
 	stroke.Parent = frame
 
 	local title = Instance.new("TextLabel")
 	title.Size = UDim2.new(1, -20, 0, 22)
-	title.Position = UDim2.new(0, 10, 0, 8)
+	title.Position = UDim2.new(0, 12, 0, 12)
 	title.BackgroundTransparency = 1
-	title.Text = "Keybinds (F1 to hide)"
-	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.Text = "KEYBINDS"
+	title.TextColor3 = TEXT
 	title.TextSize = 14
-	title.Font = Enum.Font.GothamBold
+	title.Font = Enum.Font.GothamBlack
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = frame
 
-	local body = Instance.new("TextLabel")
-	body.Size = UDim2.new(1, -20, 1, -40)
-	body.Position = UDim2.new(0, 10, 0, 32)
-	body.BackgroundTransparency = 1
-	body.Text = table.concat({
-		"LMB  - Punch / hold for reliable hits",
-		"1  - Behind + cam 3.25 + 0.75 back",
-		"2/3/4  - Behind + cam 3.25",
-		"4 + LMB (hold) - Back 4.5 studs",
-		"0  - Toggle victim cam on/off",
-		"9  - Macro: recovery -> 1 -> victim ->",
-		"     recovery -> wait 5s -> 3",
-		"E  - Go to PREVIOUS target",
-		"R  - Go to NEXT target",
-		"M  - Recovery (park + cam on head)",
-		"V  - Toggle V-cycle",
-		"T  - Clear target",
-		"P  - Toggle prediction",
-		"I  - Toggle instant interact",
-		"Y  - Toggle SMART mode",
-		"U  - Cycle position mode",
-		"H  - Toggle HUD",
-		"N  - Toggle sidebar",
-		"O  - Stop script + delete UI",
-		"",
-		"AntiVoid + AntiIdle always on.",
-		"AntiTeamer counts only hostiles",
-		"who are MOVING + facing you.",
-		"Disabled during V-cycle OR when",
-		"target is under 15 HP (finisher).",
-		"Particle recovery: park whenever",
-		"ANY effect on the victim is on.",
-	}, "\n")
-	body.TextColor3 = Color3.fromRGB(210, 210, 220)
-	body.TextSize = 12
-	body.Font = Enum.Font.Gotham
-	body.TextXAlignment = Enum.TextXAlignment.Left
-	body.TextYAlignment = Enum.TextYAlignment.Top
-	body.Parent = frame
+	local function section(y, headerText, rows)
+		local header = Instance.new("TextLabel")
+		header.Size = UDim2.new(1, -20, 0, 14)
+		header.Position = UDim2.new(0, 12, 0, y)
+		header.BackgroundTransparency = 1
+		header.Text = headerText
+		header.TextColor3 = ACCENT
+		header.TextSize = 11
+		header.Font = Enum.Font.GothamBold
+		header.TextXAlignment = Enum.TextXAlignment.Left
+		header.Parent = frame
+
+		local body = Instance.new("TextLabel")
+		body.Size = UDim2.new(1, -20, 0, #rows * 15)
+		body.Position = UDim2.new(0, 12, 0, y + 16)
+		body.BackgroundTransparency = 1
+		body.Text = table.concat(rows, "\n")
+		body.TextColor3 = TEXT
+		body.TextSize = 11
+		body.Font = Enum.Font.Gotham
+		body.TextXAlignment = Enum.TextXAlignment.Left
+		body.TextYAlignment = Enum.TextYAlignment.Top
+		body.Parent = frame
+
+		return y + 16 + #rows * 15 + 8
+	end
+
+	local y = 40
+
+	y = section(y, "MOVEMENT", {
+		"W/A/S/D    free movement",
+		"E                previous target",
+		"R                next target",
+		"T                clear target",
+		"U                cycle position mode",
+		"0                toggle victim cam",
+	})
+
+	y = section(y, "COMBAT", {
+		"LMB (hold)  melee sticky",
+		"1                 behind + 0.75 studs",
+		"2/3             behind position",
+		"4 + LMB      push back 4.5 studs",
+		"9                 macro attack sequence",
+	})
+
+	y = section(y, "SYSTEM", {
+		"M               manual recovery",
+		"V                toggle V-cycle",
+		"P                toggle prediction",
+		"I                toggle instant interact",
+		"Y                toggle SMART mode",
+		"H / N         toggle HUD / sidebar",
+		"F1              toggle this panel",
+		"O               stop script",
+	})
+
+	y = section(y, "REACTION TRIGGERS", {
+		"Victim attributes: HoldingM1, HoldingF,",
+		"Blocking, Ulted",
+		"Self attributes: Grabbed, Grabbing,",
+		"BeingGrabbed, HoldingM1, HoldingF",
+		"Victim folders: Slow, Freeze, Frozen,",
+		"DefaultArmor, M1ComboProtection,",
+		"M1Protection, CombatTag, InCombat,",
+		"Attacking, Blocking, Stunned",
+		"Self folders: Grabbed, Grabbing",
+		"Whitelisted attack particles on victim",
+	})
 
 	return { gui = gui }
 end
@@ -1684,81 +2010,68 @@ local function updateHUD()
 
 	if not isValidTarget(target) then
 		HUD.nameLabel.Text = "No Target"
-		HUD.statusLabel.Text = ENABLED and "ENABLED" or "PAUSED"
-		HUD.statusLabel.TextColor3 = ENABLED
-			and Color3.fromRGB(90, 220, 90)
-			or Color3.fromRGB(220, 200, 90)
 		HUD.healthFill.Size = UDim2.new(0, 0, 1, 0)
-		HUD.distanceLabel.Text = string.format("Cam: %.2f | Below: %.2f | Mode: %s",
-			CURRENT_DISTANCE, CURRENT_BELOW_DISTANCE, positionMode)
-		HUD.threatLabel.Text = string.format("Threats: %d | DPS: %.1f",
-			countNearbyThreats(), getRecentSelfDps())
+		HUD.statusLabel.Text = ENABLED and "READY" or "PAUSED"
+		HUD.statusLabel.TextColor3 = ENABLED and OK or WARN
 		return
 	end
 
 	local humanoid = getHumanoid(target)
 	HUD.nameLabel.Text = getTargetName(target)
 
+	local statusText
+	local statusColor
+
 	if isFinisherTarget() then
-		HUD.statusLabel.Text = "FINISHER MODE (TEAMER DEF OFF)"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+		statusText = "FINISH"
+		statusColor = WARN
 	elseif vCycleActive then
-		HUD.statusLabel.Text = "V-CYCLE (TEAMER DEF OFF)"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
-	elseif particleRecoveryActive then
-		HUD.statusLabel.Text = "PARTICLE RECOVERY"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(180, 130, 255)
+		statusText = "CYCLE"
+		statusColor = INFO
+	elseif reactionRecoveryActive then
+		statusText = "REACT"
+		statusColor = SPECIAL
 	elseif tick() < teamerParkUntil then
-		HUD.statusLabel.Text = "ANTI-TEAMER PARK"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+		statusText = "PARK"
+		statusColor = BAD
 	elseif macroActive then
-		HUD.statusLabel.Text = "MACRO RUNNING"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 100, 200)
+		statusText = "MACRO"
+		statusColor = SPECIAL
 	elseif recoveryActive then
-		HUD.statusLabel.Text = "RECOVERY (PARKED + VICTIM CAM)"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 160, 90)
+		statusText = "RECOVERY"
+		statusColor = WARN
 	elseif lmbHeld then
-		HUD.statusLabel.Text = "COMBAT (LMB HELD)"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+		statusText = "COMBAT"
+		statusColor = BAD
 	elseif tick() < combatStickyUntil then
-		HUD.statusLabel.Text = "COMBAT (MELEE STICKY)"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+		statusText = "COMBAT"
+		statusColor = BAD
 	elseif holdBackActive then
-		HUD.statusLabel.Text = "HOLD-BACK ACTIVE"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(255, 200, 90)
+		statusText = "HOLD"
+		statusColor = WARN
 	elseif not ENABLED then
-		HUD.statusLabel.Text = "PAUSED"
-		HUD.statusLabel.TextColor3 = Color3.fromRGB(220, 200, 90)
+		statusText = "PAUSED"
+		statusColor = WARN
 	else
-		local camTag = VICTIM_CAM_ENABLED and " (VICTIM CAM)" or " (FREE CAM)"
-		HUD.statusLabel.Text = string.upper(positionMode) .. camTag
-		HUD.statusLabel.TextColor3 = VICTIM_CAM_ENABLED
-			and Color3.fromRGB(255, 140, 200)
-			or (positionMode == POSITION_BELOW
-				and Color3.fromRGB(90, 220, 90)
-				or Color3.fromRGB(120, 220, 255))
+		statusText = "TRACKING"
+		statusColor = OK
 	end
+
+	HUD.statusLabel.Text = statusText
+	HUD.statusLabel.TextColor3 = statusColor
 
 	if humanoid then
 		local pct = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
 		HUD.healthFill.Size = UDim2.new(pct, 0, 1, 0)
 
 		if pct > 0.5 then
-			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(80, 220, 80)
+			HUD.healthFill.BackgroundColor3 = OK
 		elseif pct > 0.25 then
-			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(230, 200, 60)
+			HUD.healthFill.BackgroundColor3 = WARN
 		else
-			HUD.healthFill.BackgroundColor3 = Color3.fromRGB(230, 80, 80)
+			HUD.healthFill.BackgroundColor3 = BAD
 		end
 	end
-
-	HUD.distanceLabel.Text = string.format("Cam: %.2f | Below: %.2f | DMG: %d/%d",
-		CURRENT_DISTANCE, CURRENT_BELOW_DISTANCE,
-		damageReactionCount, DAMAGE_REACTION_LIMIT)
-
-	HUD.threatLabel.Text = string.format("Threats: %d | Hostiles: %d | Particles: %s",
-		countNearbyThreats(), countHostilePlayers(),
-		cachedVictimHasParticles and "yes" or "no")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -1822,15 +2135,42 @@ track(Workspace.DescendantAdded:Connect(function(descendant)
 	configureInfinitePrompt(descendant)
 end))
 
+loadingScreen = createLoadingScreen()
+
+local steps = {
+	{ 0.05, "Waking up services..." },
+	{ 0.15, "Building HUD..." },
+	{ 0.30, "Building sidebar..." },
+	{ 0.45, "Building keybind panel..." },
+	{ 0.60, "Applying instant interact..." },
+	{ 0.72, "Binding AntiVoid + AntiIdle..." },
+	{ 0.85, "Attaching health watchers..." },
+	{ 0.95, "Final touches..." },
+	{ 1.00, "Ready." },
+}
+
+for _, step in ipairs(steps) do
+	loadingScreen.setProgress(step[1], step[2])
+	task.wait(0.09)
+end
+
+HUD = createHUD()
+sidebar = createSidebar()
+helpGui = createHelpPanel()
+
 applyInstantInteract()
 bindIdle()
 
-HUD = createHUD()
-helpGui = createHelpPanel()
-sidebar = createSidebar()
-
 attachMyHealthWatcher()
 bindAntiVoid(LocalPlayer.Character)
+
+if helpGui and helpGui.gui then
+	helpGui.gui.Enabled = HELP_ENABLED
+end
+
+task.wait(0.35)
+loadingScreen.destroy()
+loadingScreen = nil
 
 characterConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 	target = nil
@@ -1856,7 +2196,7 @@ characterConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 	cachedAwayDir = Vector3.new(0, 0, 1)
 	cachedLookFlat = Vector3.new(0, 0, -1)
 	recentMovers = {}
-	resetParticleTracking()
+	resetReactionTracking()
 
 	if healthConnection then
 		healthConnection:Disconnect()
@@ -1912,36 +2252,46 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 
 	local finisher = isFinisherTarget()
 
-	if PARTICLE_RECOVERY_ENABLED and not vCycleActive and not macroActive then
-		if PARTICLE_RECOVERY_SKIPS_FINISHER and finisher then
-			if particleRecoveryActive then
-				particleRecoveryActive = false
+	if REACTION_RECOVERY_ENABLED and not vCycleActive and not macroActive then
+		if REACTION_SKIPS_FINISHER and finisher then
+			if reactionRecoveryActive then
+				reactionRecoveryActive = false
 				if recoveryActive then
 					setRecoveryMode(false)
 				end
 			end
-			cachedVictimHasParticles = false
+			cachedVictimReacting = false
+			cachedSelfReacting = false
 		else
 			local now = tick()
 
-			if now - lastParticleCheck >= PARTICLE_RESCAN_INTERVAL then
-				lastParticleCheck = now
-				cachedVictimHasParticles = victimHasParticles()
-				if cachedVictimHasParticles then
-					lastParticleSeenAt = now
+			if now - lastReactionCheck >= REACTION_RESCAN_INTERVAL then
+				lastReactionCheck = now
+
+				local vReact, vReason = victimIsReacting()
+				local sReact, sReason = selfIsReacting()
+
+				cachedVictimReacting = vReact
+				cachedSelfReacting = sReact
+
+				if vReact or sReact then
+					cachedReactionReason = sReact and sReason or vReason
+					lastReactionSeenAt = now
+				else
+					cachedReactionReason = ""
 				end
 			end
 
-			local particleWindow = (now - lastParticleSeenAt) < PARTICLE_GRACE_PERIOD
+			local reactionWindow = (now - lastReactionSeenAt) < REACTION_GRACE_PERIOD
 
-			if particleWindow then
+			if reactionWindow then
 				if not recoveryActive then
 					setRecoveryMode(true)
 				end
-				particleRecoveryActive = true
+				reactionRecoveryActive = true
 			else
-				if particleRecoveryActive then
-					particleRecoveryActive = false
+				if reactionRecoveryActive then
+					reactionRecoveryActive = false
 					if recoveryActive then
 						setRecoveryMode(false)
 					end
@@ -1950,7 +2300,7 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		end
 	end
 
-	if not vCycleActive and not finisher and not particleRecoveryActive and SMART_RECOVERY_ENABLED and not macroActive and not lmbHeld then
+	if not vCycleActive and not finisher and not reactionRecoveryActive and SMART_RECOVERY_ENABLED and not macroActive and not lmbHeld then
 		local threats = countNearbyThreats()
 		local dps = getRecentSelfDps()
 
@@ -1963,7 +2313,7 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		end
 	end
 
-	if not vCycleActive and not finisher and not particleRecoveryActive and RECOVERY_ON_ATTACK and target and isAttacking(target) and not macroActive and not lmbHeld then
+	if not vCycleActive and not finisher and not reactionRecoveryActive and RECOVERY_ON_ATTACK and target and isAttacking(target) and not macroActive and not lmbHeld then
 		if not recoveryActive then
 			setRecoveryMode(true)
 		end
@@ -2152,7 +2502,7 @@ inputConnection = UserInputService.InputBegan:Connect(function(input, gameProces
 	if input.KeyCode == Enum.KeyCode.T then
 		previousTarget = target
 		target = nil
-		resetParticleTracking()
+		resetReactionTracking()
 		if not VICTIM_CAM_ENABLED then restoreCamera() end
 		return
 	end
