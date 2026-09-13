@@ -15,8 +15,8 @@ local STOPPED = false
 
 local DEFAULT_DISTANCE = 5
 local MIN_DISTANCE = 4
-local LMB_DISTANCE = 2.5
-local KEY_DISTANCE = 3.25
+local LMB_DISTANCE = 1.8
+local KEY_DISTANCE = 2.75
 local CURRENT_DISTANCE = DEFAULT_DISTANCE
 
 local BELOW_DISTANCE = 4
@@ -24,81 +24,48 @@ local MIN_BELOW_DISTANCE = 1
 local MAX_BELOW_DISTANCE = 30
 local CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 
-local BEHIND_DISTANCE = 3.5
-local BEHIND_Y_OFFSET = 0
+local BEHIND_DISTANCE = 2.6
+local BEHIND_Y_OFFSET = -0.5
 
 local GROUND_SINK = 1.5
 
-local MELEE_STICKY_DURATION = 0.6
-local COMBAT_STANDOFF = 1.5
-local COMBAT_Y_OFFSET = 0
+local MELEE_STICKY_DURATION = 0.85
+local COMBAT_STANDOFF = 1.0
+local COMBAT_Y_OFFSET = -0.5
 
-local POSITION_SMOOTHNESS = 40
+local POSITION_SMOOTHNESS = 70
 local AWAY_DIR_MEMORY = 1.5
 
 local DAMAGE_PUSH_BACK = 1.5
 local DAMAGE_NUDGE = 0.5
 local USER_ATTACK_RANGE = 10
-local DAMAGE_REACTION_LIMIT = 2
+local DAMAGE_REACTION_LIMIT = 3
 
 local TEAMER_DEFENSE_ENABLED = true
-local TEAMER_HOSTILE_COUNT = 2
-local TEAMER_HOSTILE_RADIUS = 22
-local TEAMER_FACING_DOT = 0.35
-local TEAMER_HOSTILE_MIN_SPEED = 2.5
-local TEAMER_MOVEMENT_MEMORY = 0.75
-local TEAMER_PARK_TIME = 2.5
-local DAMAGE_BURST_WINDOW = 0.8
+local TEAMER_HOSTILE_COUNT = 1
+local TEAMER_HOSTILE_RADIUS = 26
+local TEAMER_FACING_DOT = 0.15
+local TEAMER_HOSTILE_MIN_SPEED = 2
+local TEAMER_MOVEMENT_MEMORY = 1.0
+local TEAMER_PARK_TIME = 3.5
+local DAMAGE_BURST_WINDOW = 1.0
 local DAMAGE_BURST_COUNT = 2
-local PANIC_PARK_TIME = 2
+local PANIC_PARK_TIME = 3
 
-local FINISHER_HP_THRESHOLD = 15
+local FINISHER_HP_THRESHOLD = 20
 
-local REACTION_RECOVERY_ENABLED = true
-local REACTION_RESCAN_INTERVAL = 0.08
-local REACTION_GRACE_PERIOD = 0.3
-local REACTION_SAFETY_TIMEOUT = 2.5
-local REACTION_SAFETY_COOLDOWN = 2.0
-local REACTION_SKIPS_FINISHER = true
+local PARTICLE_RECOVERY_ENABLED = true
+local PARTICLE_RESCAN_INTERVAL = 0.15
+local PARTICLE_GRACE_PERIOD = 0.35
+local PARTICLE_RECOVERY_SKIPS_FINISHER = true
 
-local USE_ATTRIBUTE_TRIGGERS = true
-local USE_FOLDER_TRIGGERS = false
-local USE_PARTICLE_TRIGGERS = true
-
-local PARTICLE_WHITELIST = {
-	"attack", "attacking", "hit", "swing", "slash", "stab", "punch",
-	"combo", "m1", "m2", "skill", "cast", "charge", "charging",
-	"windup", "wind-up", "ultimate", "ult", "awaken", "awakening",
-	"impact", "crit", "counter", "block", "parry", "dash",
-	"burst", "explosion", "shockwave", "auraattack", "rage",
-}
-
-local VICTIM_ATTACK_ATTRIBUTES = {
-	"HoldingM1",
-	"HoldingF",
-	"Blocking",
-	"Ulted",
-}
-
-local SELF_DANGER_ATTRIBUTES = {
-	"fih"
-}
-
-local VICTIM_INDICATOR_FOLDERS = {
-	"Slow",
-	"Slowed",
-	"Freeze",
-	"Frozen",
-	"CombatTag",
-	"InCombat",
-	"Attacking",
-	"Blocking",
-	"Stunned",
-}
-
-local SELF_INDICATOR_FOLDERS = {
-	"Grabbed",
-	"Grabbing",
+local PARTICLE_SKIP_ACCESSORIES = true
+local PARTICLE_NAME_BLACKLIST = {
+	"footstep", "dust", "ambient", "idle", "sweat", "step",
+	"awaken", "wake", "aura", "buff", "glow", "shine",
+	"hair", "hat", "wing", "cape", "accessory", "accessor",
+	"music", "particleholder", "seizure", "flameaura",
+	"footprint", "sparkle", "fart", "gas", "smoke",
 }
 
 local HOLD_BACK_AMOUNT = 4.5
@@ -108,8 +75,8 @@ local ONE_BACK_AMOUNT = 0.75
 
 local LMB_CHECK_DELAY = 0.4
 
-local HEAVY_DAMAGE_THRESHOLD = 15
-local LOW_HEALTH_THRESHOLD = 30
+local HEAVY_DAMAGE_THRESHOLD = 12
+local LOW_HEALTH_THRESHOLD = 40
 
 local SMART_TARGETING_ENABLED = true
 local SMART_POSITION_ENABLED = true
@@ -124,12 +91,12 @@ local MACRO_GO_VICTIM_WAIT = 1
 local MACRO_RECOVERY_WAIT = 5
 
 local FACING_DOT_THRESHOLD = 0.35
-local PREDICTION_HISTORY = 6
+local PREDICTION_HISTORY = 10
 local THREAT_RADIUS = 30
-local THREAT_COUNT_TRIGGER = 2
-local SELF_HP_RECOVERY_PCT = 0.4
+local THREAT_COUNT_TRIGGER = 1
+local SELF_HP_RECOVERY_PCT = 0.5
 local SELF_DPS_WINDOW = 1.5
-local SELF_DPS_RECOVERY_THRESHOLD = 25
+local SELF_DPS_RECOVERY_THRESHOLD = 20
 
 local PROMPT_INTERACT_DISTANCE = 16
 
@@ -142,10 +109,10 @@ local HUD_ENABLED = true
 local HELP_ENABLED = false
 
 local PREDICTION_ENABLED = true
-local PREDICTION_STRENGTH = 1.0
-local PREDICTION_LOOKAHEAD = 0.12
-local PREDICTION_MOVE_COMPENSATION = 0.4
-local PREDICTION_MAX_OFFSET = 18
+local PREDICTION_STRENGTH = 1.35
+local PREDICTION_LOOKAHEAD = 0.16
+local PREDICTION_MOVE_COMPENSATION = 0.6
+local PREDICTION_MAX_OFFSET = 22
 
 local RECOVERY_ON_ATTACK = true
 local INSTANT_INTERACT_ENABLED = true
@@ -209,6 +176,7 @@ local holdReleaseToken = 0
 local lmbMissToken = 0
 
 local velocityHistory = {}
+local accelerationHistory = {}
 
 local combatStickyUntil = 0
 
@@ -230,17 +198,20 @@ local macroToken = 0
 local teamerParkUntil = 0
 local teamerParkToken = 0
 
+local defensiveWatch = false
+local defensiveWatchUntil = 0
+local lastTeamerDamageAt = 0
+
+local damagedByTargetAt = 0
+local lastTargetDamageSource = nil
+
 local cachedAwayDir = Vector3.new(0, 0, 1)
 local cachedLookFlat = Vector3.new(0, 0, -1)
 
-local cachedVictimReacting = false
-local cachedSelfReacting = false
-local cachedReactionReason = ""
-local lastReactionCheck = 0
-local lastReactionSeenAt = 0
-local reactionRecoveryActive = false
-local reactionRecoveryStartedAt = 0
-local reactionCooldownUntil = 0
+local cachedVictimHasParticles = false
+local lastParticleCheck = 0
+local lastParticleSeenAt = 0
+local particleRecoveryActive = false
 
 local recentMovers = {}
 
@@ -311,17 +282,10 @@ local function isFinisherTarget()
 	return humanoid.Health <= FINISHER_HP_THRESHOLD
 end
 
-local function isUnderAccessory(obj)
-	if not obj then return false end
-	if obj:FindFirstAncestorOfClass("Accessory") then return true end
-	if obj:FindFirstAncestorOfClass("Accoutrement") then return true end
-	return false
-end
-
-local function matchesWhitelist(name)
+local function isBlacklistedName(name)
 	if not name then return false end
 	local lower = string.lower(name)
-	for _, keyword in ipairs(PARTICLE_WHITELIST) do
+	for _, keyword in ipairs(PARTICLE_NAME_BLACKLIST) do
 		if string.find(lower, keyword, 1, true) then
 			return true
 		end
@@ -329,10 +293,16 @@ local function matchesWhitelist(name)
 	return false
 end
 
-local function victimHasWhitelistedParticles()
-	if not USE_PARTICLE_TRIGGERS then return false, "" end
-	if not target then return false, "" end
-	if not isValidTarget(target) then return false, "" end
+local function isUnderAccessory(obj)
+	if not PARTICLE_SKIP_ACCESSORIES then return false end
+	if obj:FindFirstAncestorOfClass("Accessory") then return true end
+	if obj:FindFirstAncestorOfClass("Accoutrement") then return true end
+	return false
+end
+
+local function victimHasParticles()
+	if not target then return false end
+	if not isValidTarget(target) then return false end
 
 	for _, obj in ipairs(target:GetDescendants()) do
 		local isEffect =
@@ -341,94 +311,13 @@ local function victimHasWhitelistedParticles()
 			or obj:IsA("Beam")
 
 		if isEffect and obj.Enabled then
-			if not isUnderAccessory(obj) and matchesWhitelist(obj.Name) then
-				return true, "particle:" .. obj.Name
+			if not isUnderAccessory(obj) and not isBlacklistedName(obj.Name) then
+				return true
 			end
 		end
 	end
 
-	return false, ""
-end
-
-local function victimHasIndicatorFolder()
-	if not USE_FOLDER_TRIGGERS then return false, "" end
-	if not target then return false, "" end
-	if not isValidTarget(target) then return false, "" end
-
-	for _, folderName in ipairs(VICTIM_INDICATOR_FOLDERS) do
-		if target:FindFirstChild(folderName) then
-			return true, "folder:" .. folderName
-		end
-	end
-
-	return false, ""
-end
-
-local function victimHasAttackAttribute()
-	if not USE_ATTRIBUTE_TRIGGERS then return false, "" end
-	if not target then return false, "" end
-	if not isValidTarget(target) then return false, "" end
-
-	for _, attrName in ipairs(VICTIM_ATTACK_ATTRIBUTES) do
-		local val = target:GetAttribute(attrName)
-		if val == true then
-			return true, "victim-attr:" .. attrName
-		end
-	end
-
-	return false, ""
-end
-
-local function selfHasIndicatorFolder()
-	if not USE_FOLDER_TRIGGERS then return false, "" end
-	local character = LocalPlayer.Character
-	if not character then return false, "" end
-
-	for _, folderName in ipairs(SELF_INDICATOR_FOLDERS) do
-		if character:FindFirstChild(folderName) then
-			return true, "self-folder:" .. folderName
-		end
-	end
-
-	return false, ""
-end
-
-local function selfHasDangerAttribute()
-	if not USE_ATTRIBUTE_TRIGGERS then return false, "" end
-	local character = LocalPlayer.Character
-	if not character then return false, "" end
-
-	for _, attrName in ipairs(SELF_DANGER_ATTRIBUTES) do
-		local val = character:GetAttribute(attrName)
-		if val == true then
-			return true, "self-attr:" .. attrName
-		end
-	end
-
-	return false, ""
-end
-
-local function victimIsReacting()
-	local hit, reason = victimHasAttackAttribute()
-	if hit then return true, reason end
-
-	hit, reason = victimHasIndicatorFolder()
-	if hit then return true, reason end
-
-	hit, reason = victimHasWhitelistedParticles()
-	if hit then return true, reason end
-
-	return false, ""
-end
-
-local function selfIsReacting()
-	local hit, reason = selfHasDangerAttribute()
-	if hit then return true, reason end
-
-	hit, reason = selfHasIndicatorFolder()
-	if hit then return true, reason end
-
-	return false, ""
+	return false
 end
 
 local function addCandidate(model)
@@ -487,7 +376,7 @@ local function scoreTarget(model)
 
 	local maxHp = math.max(humanoid.MaxHealth, 1)
 	local hpPct = math.clamp(humanoid.Health / maxHp, 0, 1)
-	local hpScore = (1 - hpPct) * 40
+	local hpScore = (1 - hpPct) * 55
 
 	local toMe = myRoot.Position - root.Position
 	local flat = Vector3.new(toMe.X, 0, toMe.Z)
@@ -497,11 +386,16 @@ local function scoreTarget(model)
 		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
 		if look.Magnitude > 0.05 then
 			local dot = look.Unit:Dot(flat.Unit)
-			facingScore = math.max(0, dot) * 25
+			facingScore = math.max(0, dot) * 35
 		end
 	end
 
-	return dist - hpScore - facingScore
+	local revengeScore = 0
+	if lastTargetDamageSource == model and tick() - damagedByTargetAt < 6 then
+		revengeScore = 60
+	end
+
+	return dist - hpScore - facingScore - revengeScore
 end
 
 local function sortSmart(list)
@@ -533,21 +427,17 @@ local function getTargetName(model)
 	return model.Name
 end
 
-local function resetReactionTracking()
-	cachedVictimReacting = false
-	cachedSelfReacting = false
-	cachedReactionReason = ""
-	lastReactionCheck = 0
-	lastReactionSeenAt = 0
-	reactionRecoveryActive = false
-	reactionRecoveryStartedAt = 0
-	reactionCooldownUntil = 0
+local function resetParticleTracking()
+	cachedVictimHasParticles = false
+	lastParticleCheck = 0
+	lastParticleSeenAt = 0
+	particleRecoveryActive = false
 end
 
 local function setTarget(newTarget)
 	if newTarget ~= target then
 		previousTarget = target
-		resetReactionTracking()
+		resetParticleTracking()
 	end
 	target = newTarget
 end
@@ -563,6 +453,7 @@ local function lockTargetUnderMouse()
 		CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 		damageReactionCount = 0
 		velocityHistory = {}
+		accelerationHistory = {}
 		return true
 	end
 	return false
@@ -584,6 +475,7 @@ local function selectClosestTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
+	accelerationHistory = {}
 	return true
 end
 
@@ -604,6 +496,7 @@ local function cycleTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
+	accelerationHistory = {}
 	return true
 end
 
@@ -622,6 +515,7 @@ local function goToPreviousTarget()
 	CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 	damageReactionCount = 0
 	velocityHistory = {}
+	accelerationHistory = {}
 
 	if isValidTarget(target) then
 		local tRoot = getRoot(target)
@@ -636,7 +530,18 @@ end
 local function updateVelocityHistory(root)
 	if not ADAPTIVE_PREDICTION_ENABLED then return end
 
-	velocityHistory[#velocityHistory + 1] = root.AssemblyLinearVelocity
+	local vel = root.AssemblyLinearVelocity
+
+	if #velocityHistory > 0 then
+		local last = velocityHistory[#velocityHistory]
+		local accel = (vel - last) / math.max(1 / 60, 0.016)
+		accelerationHistory[#accelerationHistory + 1] = accel
+		while #accelerationHistory > PREDICTION_HISTORY do
+			table.remove(accelerationHistory, 1)
+		end
+	end
+
+	velocityHistory[#velocityHistory + 1] = vel
 
 	while #velocityHistory > PREDICTION_HISTORY do
 		table.remove(velocityHistory, 1)
@@ -651,8 +556,25 @@ local function getSmoothedVelocity()
 	local weightTotal = 0
 
 	for i, v in ipairs(velocityHistory) do
-		local weight = i / #velocityHistory
+		local weight = (i / #velocityHistory) ^ 2
 		sum += v * weight
+		weightTotal += weight
+	end
+
+	if weightTotal == 0 then return nil end
+	return sum / weightTotal
+end
+
+local function getSmoothedAcceleration()
+	if not ADAPTIVE_PREDICTION_ENABLED then return nil end
+	if #accelerationHistory == 0 then return nil end
+
+	local sum = Vector3.zero
+	local weightTotal = 0
+
+	for i, a in ipairs(accelerationHistory) do
+		local weight = (i / #accelerationHistory) ^ 2
+		sum += a * weight
 		weightTotal += weight
 	end
 
@@ -665,15 +587,17 @@ local function predictPosition(root, deltaTime)
 
 	local pos = root.Position
 	local vel = getSmoothedVelocity() or root.AssemblyLinearVelocity
+	local accel = getSmoothedAcceleration() or Vector3.zero
 	local humanoid = getHumanoid(root.Parent)
 	local moveDir = humanoid and humanoid.MoveDirection or Vector3.zero
 
 	local dt = deltaTime or 0
 	local lookahead = PREDICTION_LOOKAHEAD + dt
 	local velLead = vel * (PREDICTION_STRENGTH * lookahead)
+	local accelLead = accel * (0.5 * PREDICTION_STRENGTH * lookahead * lookahead)
 	local walkLead = moveDir * (PREDICTION_STRENGTH * PREDICTION_MOVE_COMPENSATION)
 
-	local predicted = pos + velLead + walkLead
+	local predicted = pos + velLead + accelLead + walkLead
 	local offset = predicted - pos
 
 	if offset.Magnitude > PREDICTION_MAX_OFFSET then
@@ -984,6 +908,26 @@ local function countHostilePlayers()
 	return count
 end
 
+local function findNearestHostile()
+	local myRoot = getMyRoot()
+	if not myRoot then return nil end
+
+	local best, bestDist
+	for _, model in ipairs(getCandidates()) do
+		local root = getRoot(model)
+		if root then
+			local dist = (root.Position - myRoot.Position).Magnitude
+			if dist <= TEAMER_HOSTILE_RADIUS then
+				if not bestDist or dist < bestDist then
+					best = model
+					bestDist = dist
+				end
+			end
+		end
+	end
+	return best
+end
+
 local function countRecentDamageEvents()
 	local now = tick()
 	local count = 0
@@ -1017,7 +961,7 @@ local function checkTeamerThreat()
 	if not TEAMER_DEFENSE_ENABLED then return false end
 	if vCycleActive then return false end
 	if macroActive then return false end
-	if isFinisherTarget() then return false end
+	if isFinisherTarget() then return false
 
 	local recent = countRecentDamageEvents()
 	if recent >= DAMAGE_BURST_COUNT then
@@ -1255,8 +1199,25 @@ local function onMyHealthChanged(newHealth)
 	local damage = -delta
 	table.insert(selfDamageTimes, { time = tick(), damage = damage })
 
+	local attacker = findNearestHostile()
+	if attacker then
+		lastTargetDamageSource = attacker
+		damagedByTargetAt = tick()
+		lastTeamerDamageAt = tick()
+	end
+
 	if vCycleActive then return end
 	if isFinisherTarget() then return end
+
+	if defensiveWatch then
+		triggerTeamerPark(PANIC_PARK_TIME)
+		defensiveWatchUntil = tick() + PANIC_PARK_TIME
+	end
+
+	if attacker then
+		triggerTeamerPark(PANIC_PARK_TIME)
+		return
+	end
 
 	if damage > HEAVY_DAMAGE_THRESHOLD then
 		triggerTeamerPark(PANIC_PARK_TIME)
@@ -1423,7 +1384,7 @@ local function vCycle()
 	vCycleActive = true
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	resetReactionTracking()
+	resetParticleTracking()
 	recentMovers = {}
 	vCycleVersion += 1
 	local myVersion = vCycleVersion
@@ -1444,6 +1405,7 @@ local function vCycle()
 					CURRENT_BELOW_DISTANCE = BELOW_DISTANCE
 					damageReactionCount = 0
 					velocityHistory = {}
+					accelerationHistory = {}
 				end
 
 				task.wait(V_CYCLE_DELAY)
@@ -1471,10 +1433,13 @@ local function stopEverything()
 	macroToken += 1
 	teamerParkUntil = 0
 	teamerParkToken += 1
-	resetReactionTracking()
+	defensiveWatch = false
+	defensiveWatchUntil = 0
+	resetParticleTracking()
 	target = nil
 	previousTarget = nil
 	velocityHistory = {}
+	accelerationHistory = {}
 	combatStickyUntil = 0
 	cachedHead = nil
 	cachedHeadTarget = nil
@@ -1654,6 +1619,16 @@ local function createLoadingScreen()
 			TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
 			{ BackgroundTransparency = 1 }
 		):Play()
+		TweenService:Create(
+			card,
+			TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }
+		):Play()
+		TweenService:Create(
+			cardStroke,
+			TweenInfo.new(0.3),
+			{ Transparency = 1 }
+		):Play()
 
 		for _, item in ipairs(card:GetDescendants()) do
 			if item:IsA("TextLabel") or item:IsA("Frame") or item:IsA("UIStroke") then
@@ -1689,8 +1664,8 @@ local function createHUD()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 560, 0, 44)
-	frame.Position = UDim2.new(0.5, -280, 0, 18)
+	frame.Size = UDim2.new(0, 480, 0, 44)
+	frame.Position = UDim2.new(0.5, -240, 0, 18)
 	frame.BackgroundColor3 = BG_DARK
 	frame.BackgroundTransparency = 0.15
 	frame.BorderSizePixel = 0
@@ -1718,7 +1693,7 @@ local function createHUD()
 	accentCorner.Parent = accentBar
 
 	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(0, 190, 1, 0)
+	nameLabel.Size = UDim2.new(0, 220, 1, 0)
 	nameLabel.Position = UDim2.new(0, 18, 0, 0)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Text = "No Target"
@@ -1730,8 +1705,8 @@ local function createHUD()
 	nameLabel.Parent = frame
 
 	local healthTrack = Instance.new("Frame")
-	healthTrack.Size = UDim2.new(0, 100, 0, 6)
-	healthTrack.Position = UDim2.new(0, 220, 0.5, 0)
+	healthTrack.Size = UDim2.new(0, 110, 0, 6)
+	healthTrack.Position = UDim2.new(1, -200, 0.5, 0)
 	healthTrack.BackgroundColor3 = BG_LIGHT
 	healthTrack.BorderSizePixel = 0
 	healthTrack.Parent = frame
@@ -1749,18 +1724,6 @@ local function createHUD()
 	local hfCorner = Instance.new("UICorner")
 	hfCorner.CornerRadius = UDim.new(1, 0)
 	hfCorner.Parent = healthFill
-
-	local reasonLabel = Instance.new("TextLabel")
-	reasonLabel.Size = UDim2.new(0, 130, 1, 0)
-	reasonLabel.Position = UDim2.new(0, 330, 0, 0)
-	reasonLabel.BackgroundTransparency = 1
-	reasonLabel.Text = ""
-	reasonLabel.TextColor3 = TEXT_DIM
-	reasonLabel.TextSize = 11
-	reasonLabel.Font = Enum.Font.GothamMedium
-	reasonLabel.TextXAlignment = Enum.TextXAlignment.Left
-	reasonLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	reasonLabel.Parent = frame
 
 	local statusPill = Instance.new("Frame")
 	statusPill.Size = UDim2.new(0, 82, 0, 22)
@@ -1788,7 +1751,6 @@ local function createHUD()
 		healthFill = healthFill,
 		statusLabel = statusLabel,
 		statusPill = statusPill,
-		reasonLabel = reasonLabel,
 	}
 end
 
@@ -1925,8 +1887,8 @@ local function createHelpPanel()
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 340, 0, 500)
-	frame.Position = UDim2.new(0, 20, 0.5, -250)
+	frame.Size = UDim2.new(0, 340, 0, 460)
+	frame.Position = UDim2.new(0, 20, 0.5, -230)
 	frame.BackgroundColor3 = BG_DARK
 	frame.BackgroundTransparency = 0.12
 	frame.BorderSizePixel = 0
@@ -1983,7 +1945,7 @@ local function createHelpPanel()
 	local y = 40
 
 	y = section(y, "MOVEMENT", {
-		"W/A/S/D    free movement",
+		"W/A/S/D    free movement when not locked",
 		"E                previous target",
 		"R                next target",
 		"T                clear target",
@@ -1992,37 +1954,22 @@ local function createHelpPanel()
 	})
 
 	y = section(y, "COMBAT", {
-		"LMB (hold)  melee sticky",
-		"1                 behind + 0.75 studs",
+		"LMB (hold)  melee sticky (snap into range)",
+		"1                 behind + 0.75 studs back",
 		"2/3             behind position",
 		"4 + LMB      push back 4.5 studs",
-		"9                 macro attack sequence",
+		"9                 macro: recovery -> attack",
 	})
 
 	y = section(y, "SYSTEM", {
-		"M               manual recovery",
+		"M               teleport away from teamer / recovery",
 		"V                toggle V-cycle",
 		"P                toggle prediction",
 		"I                toggle instant interact",
 		"Y                toggle SMART mode",
 		"H / N         toggle HUD / sidebar",
 		"F1              toggle this panel",
-		"O               stop script",
-	})
-
-	y = section(y, "REACTION TRIGGERS", {
-		"Victim attributes (on):",
-		"   HoldingM1 / HoldingF / Blocking / Ulted",
-		"Self attributes (on):",
-		"   Grabbed / Grabbing / BeingGrabbed /",
-		"   Frozen / Stunned",
-		"Attack particles (on):",
-		"   Whitelisted keywords only",
-		"Folder triggers (off):",
-		"   Enable manually if needed",
-		"",
-		"Safety: force-release after 2.5s + 2s",
-		"cooldown prevents permanent lock.",
+		"O               stop script + delete UI",
 	})
 
 	return { gui = gui }
@@ -2036,7 +1983,6 @@ local function updateHUD()
 		HUD.healthFill.Size = UDim2.new(0, 0, 1, 0)
 		HUD.statusLabel.Text = ENABLED and "READY" or "PAUSED"
 		HUD.statusLabel.TextColor3 = ENABLED and OK or WARN
-		HUD.reasonLabel.Text = ""
 		return
 	end
 
@@ -2045,7 +1991,6 @@ local function updateHUD()
 
 	local statusText
 	local statusColor
-	local reasonText = ""
 
 	if isFinisherTarget() then
 		statusText = "FINISH"
@@ -2053,10 +1998,12 @@ local function updateHUD()
 	elseif vCycleActive then
 		statusText = "CYCLE"
 		statusColor = INFO
-	elseif reactionRecoveryActive then
-		statusText = "REACT"
+	elseif particleRecoveryActive then
+		statusText = "PARTICLE"
 		statusColor = SPECIAL
-		reasonText = cachedReactionReason
+	elseif defensiveWatch then
+		statusText = "DEFEND"
+		statusColor = BAD
 	elseif tick() < teamerParkUntil then
 		statusText = "PARK"
 		statusColor = BAD
@@ -2085,7 +2032,6 @@ local function updateHUD()
 
 	HUD.statusLabel.Text = statusText
 	HUD.statusLabel.TextColor3 = statusColor
-	HUD.reasonLabel.Text = reasonText
 
 	if humanoid then
 		local pct = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
@@ -2214,16 +2160,19 @@ characterConnection = LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 	macroToken += 1
 	teamerParkUntil = 0
 	teamerParkToken += 1
+	defensiveWatch = false
+	defensiveWatchUntil = 0
 	damageReactionCount = 0
 	positionMode = POSITION_BEHIND
 	velocityHistory = {}
+	accelerationHistory = {}
 	combatStickyUntil = 0
 	cachedHead = nil
 	cachedHeadTarget = nil
 	cachedAwayDir = Vector3.new(0, 0, 1)
 	cachedLookFlat = Vector3.new(0, 0, -1)
 	recentMovers = {}
-	resetReactionTracking()
+	resetParticleTracking()
 
 	if healthConnection then
 		healthConnection:Disconnect()
@@ -2245,6 +2194,10 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 	updateHUD()
 	updateSidebar(deltaTime)
 	updateMoverStatus()
+
+	if defensiveWatch and tick() >= defensiveWatchUntil then
+		defensiveWatch = false
+	end
 
 	if not ENABLED then
 		attachHealthWatcher(nil)
@@ -2278,68 +2231,37 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 	checkTeamerThreat()
 
 	local finisher = isFinisherTarget()
-	local now = tick()
 
-	if REACTION_RECOVERY_ENABLED and not vCycleActive and not macroActive then
-		if REACTION_SKIPS_FINISHER and finisher then
-			if reactionRecoveryActive then
-				reactionRecoveryActive = false
+	if PARTICLE_RECOVERY_ENABLED and not vCycleActive and not macroActive then
+		if PARTICLE_RECOVERY_SKIPS_FINISHER and finisher then
+			if particleRecoveryActive then
+				particleRecoveryActive = false
 				if recoveryActive then
 					setRecoveryMode(false)
 				end
 			end
-			cachedVictimReacting = false
-			cachedSelfReacting = false
-			cachedReactionReason = ""
-		elseif now < reactionCooldownUntil then
-			if reactionRecoveryActive then
-				reactionRecoveryActive = false
-				if recoveryActive then
-					setRecoveryMode(false)
-				end
-			end
+			cachedVictimHasParticles = false
 		else
-			if now - lastReactionCheck >= REACTION_RESCAN_INTERVAL then
-				lastReactionCheck = now
+			local now = tick()
 
-				local vReact, vReason = victimIsReacting()
-				local sReact, sReason = selfIsReacting()
-
-				cachedVictimReacting = vReact
-				cachedSelfReacting = sReact
-
-				if vReact or sReact then
-					cachedReactionReason = sReact and sReason or vReason
-					lastReactionSeenAt = now
-				else
-					cachedReactionReason = ""
+			if now - lastParticleCheck >= PARTICLE_RESCAN_INTERVAL then
+				lastParticleCheck = now
+				cachedVictimHasParticles = victimHasParticles()
+				if cachedVictimHasParticles then
+					lastParticleSeenAt = now
 				end
 			end
 
-			local reactionWindow = (now - lastReactionSeenAt) < REACTION_GRACE_PERIOD
+			local particleWindow = (now - lastParticleSeenAt) < PARTICLE_GRACE_PERIOD
 
-			if reactionWindow then
+			if particleWindow then
 				if not recoveryActive then
 					setRecoveryMode(true)
 				end
-
-				if not reactionRecoveryActive then
-					reactionRecoveryActive = true
-					reactionRecoveryStartedAt = now
-				end
-
-				if now - reactionRecoveryStartedAt > REACTION_SAFETY_TIMEOUT then
-					reactionRecoveryActive = false
-					reactionCooldownUntil = now + REACTION_SAFETY_COOLDOWN
-					lastReactionSeenAt = 0
-					cachedReactionReason = ""
-					if recoveryActive then
-						setRecoveryMode(false)
-					end
-				end
+				particleRecoveryActive = true
 			else
-				if reactionRecoveryActive then
-					reactionRecoveryActive = false
+				if particleRecoveryActive then
+					particleRecoveryActive = false
 					if recoveryActive then
 						setRecoveryMode(false)
 					end
@@ -2348,7 +2270,7 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		end
 	end
 
-	if not vCycleActive and not finisher and not reactionRecoveryActive and SMART_RECOVERY_ENABLED and not macroActive and not lmbHeld then
+	if not vCycleActive and not finisher and not particleRecoveryActive and SMART_RECOVERY_ENABLED and not macroActive and not lmbHeld then
 		local threats = countNearbyThreats()
 		local dps = getRecentSelfDps()
 
@@ -2361,7 +2283,7 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 		end
 	end
 
-	if not vCycleActive and not finisher and not reactionRecoveryActive and RECOVERY_ON_ATTACK and target and isAttacking(target) and not macroActive and not lmbHeld then
+	if not vCycleActive and not finisher and not particleRecoveryActive and RECOVERY_ON_ATTACK and target and isAttacking(target) and not macroActive and not lmbHeld then
 		if not recoveryActive then
 			setRecoveryMode(true)
 		end
@@ -2373,8 +2295,9 @@ mainConnection = RunService.RenderStepped:Connect(function(deltaTime)
 
 	local teamerParking = (not vCycleActive) and (not finisher) and tick() < teamerParkUntil
 	local activeRecovery = (not vCycleActive) and (not finisher) and recoveryActive
+	local watching = defensiveWatch and (not finisher)
 
-	if teamerParking or activeRecovery then
+	if teamerParking or activeRecovery or watching then
 		parkCharacter()
 	elseif tick() < combatStickyUntil then
 		moveCharacterCombat(targetRoot, deltaTime)
@@ -2474,7 +2397,18 @@ inputConnection = UserInputService.InputBegan:Connect(function(input, gameProces
 	end
 
 	if input.KeyCode == Enum.KeyCode.M then
-		setRecoveryMode(not recoveryActive)
+		local hostile = findNearestHostile()
+		local hostiles = countHostilePlayers()
+
+		if hostile or hostiles >= 1 or tick() - lastTeamerDamageAt < 3 then
+			triggerTeamerPark(TEAMER_PARK_TIME)
+			defensiveWatch = true
+			defensiveWatchUntil = tick() + TEAMER_PARK_TIME
+			recoveryActive = false
+		else
+			defensiveWatch = false
+			setRecoveryMode(not recoveryActive)
+		end
 		return
 	end
 
@@ -2550,7 +2484,7 @@ inputConnection = UserInputService.InputBegan:Connect(function(input, gameProces
 	if input.KeyCode == Enum.KeyCode.T then
 		previousTarget = target
 		target = nil
-		resetReactionTracking()
+		resetParticleTracking()
 		if not VICTIM_CAM_ENABLED then restoreCamera() end
 		return
 	end
