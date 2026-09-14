@@ -14,43 +14,43 @@ pcall(function()
 end)
 
 local C = {
-    minDistance = 5,
-    defaultDistance = 5,
-    lmbDistance = 5,
-    keyDistance = 5,
-    belowDistance = 5,
-    minBelowDistance = 5,
-    maxBelowDistance = 30,
-    behindDistance = 5,
+    minDistance = 2.5,
+    defaultDistance = 3,
+    lmbDistance = 2.5,
+    keyDistance = 2.5,
+    belowDistance = 2.5,
+    minBelowDistance = 2.5,
+    maxBelowDistance = 32,
+    behindDistance = 2.5,
     behindYOffset = 0,
-    groundSink = 1.5,
-    characterDownTilt = math.rad(7),
-    meleeStickyDuration = 0.6,
-    combatStandoff = 5,
+    groundSink = 1.2,
+    characterDownTilt = math.rad(8),
+    meleeStickyDuration = 0.85,
+    combatStandoff = 2.5,
     combatYOffset = 0,
-    positionSmoothness = 40,
-    awayDirMemory = 1.5,
-    damagePushBack = 1.5,
-    damageNudge = 0.5,
-    userAttackRange = 10,
-    damageReactionLimit = 2,
+    positionSmoothness = 65,
+    awayDirMemory = 1.0,
+    damagePushBack = 2.2,
+    damageNudge = 0.6,
+    userAttackRange = 12,
+    damageReactionLimit = 3,
     teamerDefenseEnabled = true,
     teamerHostileCount = 2,
-    teamerHostileRadius = 22,
-    teamerFacingDot = 0.35,
-    teamerHostileMinSpeed = 2.5,
-    teamerMovementMemory = 0.75,
-    teamerParkTime = 2.5,
+    teamerHostileRadius = 26,
+    teamerFacingDot = 0.30,
+    teamerHostileMinSpeed = 2.0,
+    teamerMovementMemory = 0.85,
+    teamerParkTime = 2.2,
     damageBurstWindow = 0.8,
     damageBurstCount = 2,
-    panicParkTime = 2,
-    finisherHpThreshold = 15,
+    panicParkTime = 1.8,
+    finisherHpThreshold = 22,
     particleRecoveryEnabled = true,
-    particleRescanInterval = 0.15,
-    particleGracePeriod = 0.35,
+    particleRescanInterval = 0.1,
+    particleGracePeriod = 0.5,
     particleRecoverySkipsFinisher = true,
-    targetDamageMemory = 0.7,
-    persistentParticleThreshold = 60,
+    targetDamageMemory = 0.8,
+    persistentParticleThreshold = 70,
     particleSkipAccessories = true,
     particleNameBlacklist = {
         "footstep", "dust", "ambient", "idle", "sweat", "step",
@@ -59,42 +59,42 @@ local C = {
         "music", "particleholder", "seizure", "flameaura",
         "footprint", "sparkle", "fart", "gas", "smoke",
     },
-    holdBackAmount = 4.5,
-    holdReleaseDelay = 2,
-    oneBackAmount = 0.75,
-    lmbCheckDelay = 0.4,
-    heavyDamageThreshold = 15,
+    holdBackAmount = 5.5,
+    holdReleaseDelay = 1.5,
+    oneBackAmount = 0.9,
+    lmbCheckDelay = 0.3,
+    heavyDamageThreshold = 12,
     lowHealthThreshold = 30,
-    macroStepDelay = 0.15,
-    macroGoVictimWait = 1,
-    macroRecoveryWait = 5,
-    facingDotThreshold = 0.35,
-    predictionHistory = 12,
-    threatRadius = 30,
-    threatCountTrigger = 2,
-    selfHpRecoveryPct = 0.4,
+    macroStepDelay = 0.1,
+    macroGoVictimWait = 0.85,
+    macroRecoveryWait = 4.5,
+    facingDotThreshold = 0.30,
+    predictionHistory = 16,
+    threatRadius = 34,
+    threatCountTrigger = 3,
+    selfHpRecoveryPct = 0.42,
     selfDpsWindow = 1.5,
-    selfDpsRecoveryThreshold = 25,
-    promptInteractDistance = 16,
+    selfDpsRecoveryThreshold = 22,
+    promptInteractDistance = 24,
     parkPosition = Vector3.new(0, 2000, 0),
     manualParkPosition = Vector3.new(0, 5000, 0),
     vCycleRounds = 2,
-    vCycleDelay = 0.35,
-    predictionStrength = 1.0,
-    predictionLookahead = 0.24,
-    predictionMoveCompensation = 2.4,
-    predictionMaxOffset = 55,
-    predictionPingScale = 1.0,
-    predictionPingCap = 0.35,
-    predictionVerticalBoost = 1.4,
-    wallRaycastDistance = 500,
-    wallStopOffset = 3,
-    wallRetreatSpeedFallback = 20,
-    wallRecalcDistance = 40,
-    m1TeleportDistance = 4,
-    manualRecoveryCooldownTime = 4,
-    autoCombatHitDelay = 0.5,
-    autoCombatKeyDelay = 0.5,
+    vCycleDelay = 0.3,
+    predictionStrength = 1.35,
+    predictionLookahead = 0.32,
+    predictionMoveCompensation = 3.2,
+    predictionMaxOffset = 70,
+    predictionPingScale = 1.1,
+    predictionPingCap = 0.4,
+    predictionVerticalBoost = 1.6,
+    wallRaycastDistance = 600,
+    wallStopOffset = 2,
+    wallRetreatSpeedFallback = 26,
+    wallRecalcDistance = 25,
+    m1TeleportDistance = 3,
+    manualRecoveryCooldownTime = 3.5,
+    autoCombatHitDelay = 0.35,
+    autoCombatKeyDelay = 0.4,
     positionBelow = "below",
     positionBehind = "behind",
     positionAuto = "auto",
@@ -128,13 +128,12 @@ local S = {
     victimCamEnabled = true,
     sidebarEnabled = true,
     hudEnabled = true,
-    helpEnabled = false,
     predictionEnabled = true,
     instantInteractEnabled = true,
     recoveryOnAttack = true,
     positionMode = "behind",
-    currentDistance = 5,
-    currentBelowDistance = 5,
+    currentDistance = 3,
+    currentBelowDistance = 2.5,
     manualRecoveryCooldown = 0,
     target = nil,
     previousTarget = nil,
@@ -148,7 +147,6 @@ local S = {
     vCycleActive = false,
     vCycleVersion = 0,
     hud = nil,
-    helpGui = nil,
     sidebar = nil,
     loadingScreen = nil,
     healthConnection = nil,
@@ -385,7 +383,7 @@ local function scoreTarget(model)
     local dist = (root.Position - myRoot.Position).Magnitude
     local maxHp = math.max(humanoid.MaxHealth, 1)
     local hpPct = math.clamp(humanoid.Health / maxHp, 0, 1)
-    local hpScore = (1 - hpPct) * 45
+    local hpScore = (1 - hpPct) * 55
 
     local toMe = myRoot.Position - root.Position
     local flat = Vector3.new(toMe.X, 0, toMe.Z)
@@ -395,11 +393,15 @@ local function scoreTarget(model)
         local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
         if look.Magnitude > 0.05 then
             local dot = look.Unit:Dot(flat.Unit)
-            facingScore = math.max(0, dot) * 30
+            facingScore = math.max(0, dot) * 35
         end
     end
 
-    return dist - hpScore - facingScore
+    local threatScore = 0
+    if isAnchoredTarget(model) then threatScore = threatScore + 8 end
+    if hasM1Attribute(model) then threatScore = threatScore + 12 end
+
+    return dist - hpScore - facingScore + threatScore
 end
 
 local function sortSmart(list)
@@ -1139,7 +1141,7 @@ local function vimMouseClick()
     if not virtualInputManager then return end
     if not virtualInputManager.SendMouseButtonEvent then return end
     pcall(function() virtualInputManager:SendMouseButtonEvent(0, 0, 1, true, nil, 0) end)
-    task.wait(0.03)
+    task.wait(0.02)
     pcall(function() virtualInputManager:SendMouseButtonEvent(0, 0, 1, false, nil, 0) end)
 end
 
@@ -1147,9 +1149,9 @@ local function vimKeyPress(keyCode)
     if not virtualInputManager then return end
     if not virtualInputManager.SendKeyEvent then return end
     pcall(function() virtualInputManager:SendKeyEvent(keyCode, true, false, nil) end)
-    task.wait(0.05)
+    task.wait(0.04)
     pcall(function() virtualInputManager:SendKeyEvent(keyCode, false, false, nil) end)
-    task.wait(0.05)
+    task.wait(0.04)
 end
 
 local function autoCombatBurst(count, myToken)
@@ -1194,17 +1196,17 @@ local function runAutoCombat()
                 return
             end
 
-            if not autoCombatBurst(4, myToken) then return end
+            if not autoCombatBurst(5, myToken) then return end
             if not S.autoCombatActive or myToken ~= S.autoCombatToken then return end
             vimKeyPress(Enum.KeyCode.Q)
             task.wait(C.autoCombatKeyDelay)
 
-            if not autoCombatBurst(4, myToken) then return end
+            if not autoCombatBurst(5, myToken) then return end
             if not S.autoCombatActive or myToken ~= S.autoCombatToken then return end
             vimKeyPress(Enum.KeyCode.Two)
             task.wait(C.autoCombatKeyDelay)
 
-            if not autoCombatBurst(4, myToken) then return end
+            if not autoCombatBurst(5, myToken) then return end
             if not S.autoCombatActive or myToken ~= S.autoCombatToken then return end
             vimKeyPress(Enum.KeyCode.One)
             task.wait(C.autoCombatKeyDelay)
@@ -1213,7 +1215,7 @@ local function runAutoCombat()
             vimKeyPress(Enum.KeyCode.Q)
             task.wait(C.autoCombatKeyDelay)
 
-            if not autoCombatBurst(4, myToken) then return end
+            if not autoCombatBurst(5, myToken) then return end
             if not S.autoCombatActive or myToken ~= S.autoCombatToken then return end
             vimKeyPress(Enum.KeyCode.Three)
             task.wait(C.autoCombatKeyDelay)
@@ -1497,8 +1499,6 @@ local function stopEverything()
 
     pcall(function() if S.hud and S.hud.gui then S.hud.gui:Destroy() end end)
     S.hud = nil
-    pcall(function() if S.helpGui and S.helpGui.gui then S.helpGui.gui:Destroy() end end)
-    S.helpGui = nil
     pcall(function() if S.sidebar and S.sidebar.gui then S.sidebar.gui:Destroy() end end)
     S.sidebar = nil
     pcall(function() if S.loadingScreen and S.loadingScreen.gui then S.loadingScreen.gui:Destroy() end end)
@@ -1507,7 +1507,7 @@ local function stopEverything()
     pcall(function()
         local pg = localPlayer:FindFirstChild("PlayerGui")
         if pg then
-            for _, name in ipairs({ "ParkCamHUD", "ParkCamHelp", "ParkCamSidebar", "LarpingHubLoading" }) do
+            for _, name in ipairs({ "ParkCamHUD", "ParkCamSidebar", "LarpingHubLoading" }) do
                 local ui = pg:FindFirstChild(name)
                 if ui then ui:Destroy() end
             end
@@ -1715,102 +1715,6 @@ local function updateSidebar(deltaTime)
     S.sidebar.lowHpValue.TextColor3 = hpColor
 end
 
-local function createHelpPanel()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "ParkCamHelp"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.Parent = localPlayer:WaitForChild("PlayerGui")
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 340, 0, 480)
-    frame.Position = UDim2.new(0, 20, 0.5, -240)
-    frame.BackgroundColor3 = C.bgDark
-    frame.BackgroundTransparency = 0.12
-    frame.BorderSizePixel = 0
-    frame.Parent = gui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = frame
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = C.bgLight
-    stroke.Thickness = 1
-    stroke.Transparency = 0.3
-    stroke.Parent = frame
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -20, 0, 22)
-    title.Position = UDim2.new(0, 12, 0, 12)
-    title.BackgroundTransparency = 1
-    title.Text = "KEYBINDS"
-    title.TextColor3 = C.textColor
-    title.TextSize = 14
-    title.Font = Enum.Font.GothamBlack
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = frame
-
-    local function section(y, headerText, rows)
-        local header = Instance.new("TextLabel")
-        header.Size = UDim2.new(1, -20, 0, 14)
-        header.Position = UDim2.new(0, 12, 0, y)
-        header.BackgroundTransparency = 1
-        header.Text = headerText
-        header.TextColor3 = C.accent
-        header.TextSize = 11
-        header.Font = Enum.Font.GothamBold
-        header.TextXAlignment = Enum.TextXAlignment.Left
-        header.Parent = frame
-
-        local body = Instance.new("TextLabel")
-        body.Size = UDim2.new(1, -20, 0, #rows * 15)
-        body.Position = UDim2.new(0, 12, 0, y + 16)
-        body.BackgroundTransparency = 1
-        body.Text = table.concat(rows, "\n")
-        body.TextColor3 = C.textColor
-        body.TextSize = 11
-        body.Font = Enum.Font.Gotham
-        body.TextXAlignment = Enum.TextXAlignment.Left
-        body.TextYAlignment = Enum.TextYAlignment.Top
-        body.Parent = frame
-
-        return y + 16 + #rows * 15 + 8
-    end
-
-    local y = 40
-    y = section(y, "MOVEMENT", {
-        "W/A/S/D    free movement when not locked",
-        "E                previous target",
-        "R                next target",
-        "T                clear target",
-        "U                cycle position mode",
-        "K                toggle victim cam",
-    })
-    y = section(y, "COMBAT", {
-        "0                toggle auto combat",
-        "Q                snap into combat range",
-        "LMB (hold)  melee sticky (snap into range)",
-        "1                 behind + 0.75 studs back",
-        "2/3             behind position",
-        "4 + LMB      push back 4.5 studs",
-        "9                 macro: recovery -> attack",
-    })
-    y = section(y, "SYSTEM", {
-        "C                cancel ALL recovery (4s cooldown)",
-        "M               recovery -> 0,5000,0 (bypasses cd)",
-        "V                toggle V-cycle",
-        "P                toggle prediction",
-        "I                toggle instant interact",
-        "Y                toggle SMART mode",
-        "H / N         toggle HUD / sidebar",
-        "F1              toggle this panel",
-        "O               stop script + delete UI",
-    })
-
-    return { gui = gui }
-end
-
 local function updateHUD()
     if not S.hud then return end
     if not isValidTarget(S.target) then
@@ -1949,14 +1853,11 @@ end
 
 S.hud = createHUD()
 S.sidebar = createSidebar()
-S.helpGui = createHelpPanel()
 
 applyInstantInteract()
 bindIdle()
 attachMyHealthWatcher()
 bindAntiVoid(localPlayer.Character)
-
-if S.helpGui and S.helpGui.gui then S.helpGui.gui.Enabled = C.helpEnabled end
 
 S.characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     S.target = nil
@@ -2278,12 +2179,6 @@ S.inputConnection = userInputService.InputBegan:Connect(function(input, gameProc
     if input.KeyCode == Enum.KeyCode.H then
         S.hudEnabled = not S.hudEnabled
         if S.hud and S.hud.gui then S.hud.gui.Enabled = S.hudEnabled end
-        return
-    end
-
-    if input.KeyCode == Enum.KeyCode.F1 then
-        S.helpEnabled = not S.helpEnabled
-        if S.helpGui and S.helpGui.gui then S.helpGui.gui.Enabled = S.helpEnabled end
         return
     end
 
