@@ -979,6 +979,15 @@ local function setRecoveryMode(enabledState)
     end
 end
 
+local function forceRecovery(enabledState)
+    manualRecoveryCooldown = 0
+    recoveryActive = enabledState
+    if enabledState then
+        particleRecoveryActive = false
+        parkCharacter()
+    end
+end
+
 local function exitAllRecovery()
     recoveryActive = false
     particleRecoveryActive = false
@@ -1949,7 +1958,7 @@ local function createHelpPanel()
 
     y = section(y, "SYSTEM", {
         "C                cancel ALL recovery (4s cooldown)",
-        "M               manual recovery",
+        "M               toggle recovery (bypasses cooldown)",
         "V                toggle V-cycle",
         "P                toggle prediction",
         "I                toggle instant interact",
@@ -2138,11 +2147,11 @@ end
 
 if loadingScreen then
     local steps = {
-        { 0.10, "waking up services" },
-        { 0.28, "linking modules" },
-        { 0.48, "building ui" },
-        { 0.68, "applying instant interact" },
-        { 0.85, "binding antivoid + antiidle" },
+        { 0.15, "starting up" },
+        { 0.35, "loading modules" },
+        { 0.55, "preparing ui" },
+        { 0.75, "hooking controls" },
+        { 0.90, "almost ready" },
         { 1.00, "ready" },
     }
 
@@ -2151,14 +2160,14 @@ if loadingScreen then
         task.wait(0.16)
     end
 
-    task.wait(0.55)
+    task.wait(0.5)
 
     pcall(function()
         loadingScreen.destroy()
     end)
     loadingScreen = nil
 
-    task.wait(0.5)
+    task.wait(0.45)
 end
 
 hud = createHUD()
@@ -2399,6 +2408,11 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         return
     end
 
+    if input.KeyCode == Enum.KeyCode.M then
+        forceRecovery(not recoveryActive)
+        return
+    end
+
     if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode.Zero then
@@ -2467,11 +2481,6 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
     if input.KeyCode == Enum.KeyCode.RightShift then
         enabled = not enabled
         if not enabled then restoreCamera() end
-        return
-    end
-
-    if input.KeyCode == Enum.KeyCode.M then
-        setRecoveryMode(not recoveryActive)
         return
     end
 
