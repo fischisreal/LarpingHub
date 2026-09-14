@@ -243,7 +243,6 @@ local manualRecoveryPark = false
 
 local autoCombatActive = false
 local autoCombatToken = 0
-local sendingVirtualInput = false
 
 local function track(connection)
     trackedConnections[#trackedConnections + 1] = connection
@@ -1339,25 +1338,23 @@ end
 
 local function autoCombatHit()
     pcall(function()
-        virtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        virtualInputManager:SendMouseButtonEvent(0, 0, 1, true, nil, 0)
     end)
     task.wait(0.03)
     pcall(function()
-        virtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        virtualInputManager:SendMouseButtonEvent(0, 0, 1, false, nil, 0)
     end)
 end
 
 local function autoCombatPressKey(keyCode)
-    sendingVirtualInput = true
     pcall(function()
-        virtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        virtualInputManager:SendKeyEvent(keyCode, true, false, nil)
     end)
     task.wait(0.05)
     pcall(function()
-        virtualInputManager:SendKeyEvent(false, keyCode, false, game)
+        virtualInputManager:SendKeyEvent(keyCode, false, false, nil)
     end)
     task.wait(0.05)
-    sendingVirtualInput = false
 end
 
 local function autoCombatBurst(count, myToken)
@@ -1672,10 +1669,6 @@ end
 
 local function onQOrYAction(actionName, inputState, inputObject)
     if inputState ~= Enum.UserInputState.Begin then
-        return Enum.ContextActionResult.Pass
-    end
-
-    if sendingVirtualInput then
         return Enum.ContextActionResult.Pass
     end
 
