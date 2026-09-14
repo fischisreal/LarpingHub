@@ -232,6 +232,7 @@ local cachedWallTarget = nil
 local cachedWallOrigin = nil
 
 local m1Active = false
+local ultedActive = false
 
 local function track(connection)
     trackedConnections[#trackedConnections + 1] = connection
@@ -320,6 +321,21 @@ local function hasM1Attribute(model)
         if type(value) == "boolean" and value == true then
             local lower = string.lower(tostring(name))
             if string.find(lower, "m1", 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function hasUltedAttribute(model)
+    if not model then return false end
+    local ok, attrs = pcall(function() return model:GetAttributes() end)
+    if not ok or not attrs then return false end
+    for name, value in pairs(attrs) do
+        if type(value) == "boolean" and value == true then
+            local lower = string.lower(tostring(name))
+            if string.find(lower, "ulted", 1, true) then
                 return true
             end
         end
@@ -495,6 +511,7 @@ local function setTarget(newTarget)
         lastTargetDamageTime = 0
         wallRetreatActive = false
         m1Active = false
+        ultedActive = false
         clearWallCache()
     end
     target = newTarget
@@ -1115,6 +1132,7 @@ local function triggerTeamerPark(duration)
     if vCycleActive then return end
     if isFinisherTarget() then return end
     if tick() < manualRecoveryCooldown then return end
+    if ultedActive then return end
 
     local now = tick()
     local newEnd = now + (duration or teamerParkTime)
@@ -1132,6 +1150,7 @@ local function checkTeamerThreat()
     if isFinisherTarget() then return false end
     if tick() < manualRecoveryCooldown then return false end
     if m1Active then return false end
+    if ultedActive then return false end
 
     local recent = countRecentDamageEvents()
     if recent >= damageBurstCount then
@@ -1600,6 +1619,7 @@ local function stopEverything()
     cachedLookFlat = Vector3.new(0, 0, -1)
     recentMovers = {}
     m1Active = false
+    ultedActive = false
 
     pcall(function() if healthConnection then healthConnection:Disconnect() end end)
     healthConnection = nil
@@ -1997,6 +2017,9 @@ local function updateHUD()
     elseif m1Active then
         statusText = "M1"
         statusColor = badColor
+    elseif ultedActive then
+        statusText = "ULTED"
+        statusColor = specialColor
     elseif vCycleActive then
         statusText = "CYCLE"
         statusColor = infoColor
@@ -2210,6 +2233,7 @@ characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     recentMovers = {}
     wallRetreatActive = false
     m1Active = false
+    ultedActive = false
     clearWallCache()
     resetParticleTracking()
     lastTargetDamageTime = 0
@@ -2245,6 +2269,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         target = nil
         wallRetreatActive = false
         m1Active = false
+        ultedActive = false
         clearWallCache()
     end
 
@@ -2273,6 +2298,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
     local grabbed = hasGrabbedFolder(target)
     local m1On = hasM1Attribute(target)
     m1Active = m1On
+    ultedActive = hasUltedAttribute(target)
 
     if grabbed then
         if not wallRetreatActive then
@@ -2560,6 +2586,7 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         lastTargetDamageTime = 0
         wallRetreatActive = false
         m1Active = false
+        ultedActive = false
         clearWallCache()
         if not victimCamEnabled then restoreCamera() end
         return
