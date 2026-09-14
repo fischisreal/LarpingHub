@@ -60,6 +60,7 @@ local particleRescanInterval = 0.15
 local particleGracePeriod = 0.35
 local particleRecoverySkipsFinisher = true
 local targetDamageMemory = 0.7
+local persistentParticleThreshold = 60
 
 local particleSkipAccessories = true
 local particleNameBlacklist = {
@@ -123,6 +124,8 @@ local wallStopOffset = 3
 local wallRetreatSpeedFallback = 20
 local wallRecalcDistance = 40
 
+local m1TeleportDistance = 4
+
 local manualRecoveryCooldownTime = 4
 local manualRecoveryCooldown = 0
 
@@ -133,6 +136,8 @@ local positionBelow = "below"
 local positionBehind = "behind"
 local positionAuto = "auto"
 local positionMode = positionBehind
+
+local loadingUrl = "https://raw.githubusercontent.com/fischisreal/LarpingHub/main/docs/Loading.lua"
 
 local attackAnimationIds = {
     "rbxassetid://1234567890",
@@ -217,6 +222,7 @@ local cachedVictimHasParticles = false
 local lastParticleCheck = 0
 local lastParticleSeenAt = 0
 local particleRecoveryActive = false
+local particleContinuousStart = 0
 
 local recentMovers = {}
 
@@ -224,6 +230,8 @@ local wallRetreatActive = false
 local cachedWallCFrame = nil
 local cachedWallTarget = nil
 local cachedWallOrigin = nil
+
+local m1Active = false
 
 local function track(connection)
     trackedConnections[#trackedConnections + 1] = connection
@@ -302,6 +310,21 @@ end
 local function hasGrabbedFolder(model)
     if not model then return false end
     return model:FindFirstChild("Grabbed") ~= nil
+end
+
+local function hasM1Attribute(model)
+    if not model then return false end
+    local ok, attrs = pcall(function() return model:GetAttributes() end)
+    if not ok or not attrs then return false end
+    for name, value in pairs(attrs) do
+        if type(value) == "boolean" and value == true then
+            local lower = string.lower(tostring(name))
+            if string.find(lower, "m1", 1, true) then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local function isProtectedFromTeamerDetection(model)
@@ -456,6 +479,7 @@ local function resetParticleTracking()
     lastParticleCheck = 0
     lastParticleSeenAt = 0
     particleRecoveryActive = false
+    particleContinuousStart = 0
 end
 
 local function clearWallCache()
@@ -470,6 +494,7 @@ local function setTarget(newTarget)
         resetParticleTracking()
         lastTargetDamageTime = 0
         wallRetreatActive = false
+        m1Active = false
         clearWallCache()
     end
     target = newTarget
@@ -765,6 +790,50 @@ local function moveCharacterBehind(targetRoot, deltaTime)
     end
 end
 
+local function teleportBehindM1(targetRoot)
+    local character = localPlayer.Character
+    local root = character and getRoot(character)
+    if not root then return end
+
+    local humanoid = getHumanoid(character)
+    local predicted = predictPosition(targetRoot, 0)
+
+    local lookFlatRaw = Vector3.new(
+        targetRoot.CFrame.LookVector.X,
+        0,
+        targetRoot.CFrame.LookVector.Z
+    )
+
+    local lookFlat
+    if lookFlatRaw.Magnitude > 0.05 then
+        lookFlat = lookFlatRaw.Unit
+        cachedLookFlat = lookFlat
+    else
+        lookFlat = cachedLookFlat
+    end
+
+    local behindPos = Vector3.new(
+        predicted.X - lookFlat.X * m1TeleportDistance,
+        predicted.Y - groundSink,
+        predicted.Z - lookFlat.Z * m1TeleportDistance
+    )
+
+    local torsoPos = getTorso(targetRoot.Parent, predicted + Vector3.new(0, 2, 0))
+    local dir = torsoPos - behindPos
+    if dir.Magnitude < 0.05 then
+        dir = Vector3.new(0, 1, 0)
+    end
+
+    local newCF = CFrame.lookAt(behindPos, behindPos + dir.Unit) * CFrame.Angles(-characterDownTilt, 0, 0)
+    root.CFrame = newCF
+    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+
+    if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+        humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    end
+end
+
 local function computeWallCFrame(targetRoot, character)
     local root = character and getRoot(character)
     if not root then return nil end
@@ -1053,6 +1122,7 @@ local function checkTeamerThreat()
     if macroActive then return false end
     if isFinisherTarget() then return false end
     if tick() < manualRecoveryCooldown then return false end
+    if m1Active then return false end
 
     local recent = countRecentDamageEvents()
     if recent >= damageBurstCount then
@@ -1520,6 +1590,7 @@ local function stopEverything()
     cachedAwayDir = Vector3.new(0, 0, 1)
     cachedLookFlat = Vector3.new(0, 0, -1)
     recentMovers = {}
+    m1Active = false
 
     pcall(function() if healthConnection then healthConnection:Disconnect() end end)
     healthConnection = nil
@@ -1569,266 +1640,6 @@ local function stopEverything()
     end)
 
     pcall(restoreCamera)
-end
-
-local function createLoadingScreen()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "LarpingHubLoading"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 1000
-    gui.Parent = localPlayer:WaitForChild("PlayerGui")
-
-    local card = Instance.new("Frame")
-    card.AnchorPoint = Vector2.new(0.5, 0.5)
-    card.Position = UDim2.new(0.5, 0, 0.5, 0)
-    card.Size = UDim2.new(0, 0, 0, 0)
-    card.BackgroundColor3 = bgDark
-    card.BackgroundTransparency = 0.05
-    card.BorderSizePixel = 0
-    card.Parent = gui
-
-    local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = UDim.new(0, 20)
-    cardCorner.Parent = card
-
-    local cardStroke = Instance.new("UIStroke")
-    cardStroke.Color = accent
-    cardStroke.Thickness = 1.5
-    cardStroke.Transparency = 0.15
-    cardStroke.Parent = card
-
-    local innerStroke = Instance.new("Frame")
-    innerStroke.Size = UDim2.new(1, -12, 1, -12)
-    innerStroke.Position = UDim2.new(0, 6, 0, 6)
-    innerStroke.BackgroundTransparency = 1
-    innerStroke.BorderSizePixel = 0
-    innerStroke.Parent = card
-
-    local innerStrokeCorner = Instance.new("UICorner")
-    innerStrokeCorner.CornerRadius = UDim.new(0, 15)
-    innerStrokeCorner.Parent = innerStroke
-
-    local innerStrokeLine = Instance.new("UIStroke")
-    innerStrokeLine.Color = accent
-    innerStrokeLine.Thickness = 1
-    innerStrokeLine.Transparency = 0.78
-    innerStrokeLine.Parent = innerStroke
-
-    local topBar = Instance.new("Frame")
-    topBar.AnchorPoint = Vector2.new(0.5, 0)
-    topBar.Position = UDim2.new(0.5, 0, 0, 12)
-    topBar.Size = UDim2.new(0, 80, 0, 3)
-    topBar.BackgroundColor3 = accent
-    topBar.BorderSizePixel = 0
-    topBar.Parent = card
-
-    local topBarCorner = Instance.new("UICorner")
-    topBarCorner.CornerRadius = UDim.new(1, 0)
-    topBarCorner.Parent = topBar
-
-    local topBarGlow = Instance.new("UIStroke")
-    topBarGlow.Color = accent
-    topBarGlow.Thickness = 5
-    topBarGlow.Transparency = 0.55
-    topBarGlow.Parent = topBar
-
-    local titleShadow = Instance.new("TextLabel")
-    titleShadow.AnchorPoint = Vector2.new(0.5, 0)
-    titleShadow.Position = UDim2.new(0.5, 0, 0, 32)
-    titleShadow.Size = UDim2.new(1, 0, 0, 46)
-    titleShadow.BackgroundTransparency = 1
-    titleShadow.Text = "LARPING HUB"
-    titleShadow.TextColor3 = accent
-    titleShadow.TextTransparency = 0.55
-    titleShadow.TextSize = 38
-    titleShadow.Font = Enum.Font.GothamBlack
-    titleShadow.Parent = card
-
-    local title = Instance.new("TextLabel")
-    title.AnchorPoint = Vector2.new(0.5, 0)
-    title.Position = UDim2.new(0.5, 0, 0, 32)
-    title.Size = UDim2.new(1, 0, 0, 46)
-    title.BackgroundTransparency = 1
-    title.Text = "LARPING HUB"
-    title.TextColor3 = textColor
-    title.TextSize = 38
-    title.Font = Enum.Font.GothamBlack
-    title.Parent = card
-
-    local titleStroke = Instance.new("UIStroke")
-    titleStroke.Color = accent
-    titleStroke.Thickness = 1
-    titleStroke.Transparency = 0.35
-    titleStroke.Parent = title
-
-    local divider = Instance.new("Frame")
-    divider.AnchorPoint = Vector2.new(0.5, 0.5)
-    divider.Position = UDim2.new(0.5, 0, 0, 88)
-    divider.Size = UDim2.new(0, 180, 0, 1)
-    divider.BackgroundColor3 = accent
-    divider.BackgroundTransparency = 0.4
-    divider.BorderSizePixel = 0
-    divider.Parent = card
-
-    local dividerDot = Instance.new("Frame")
-    dividerDot.AnchorPoint = Vector2.new(0.5, 0.5)
-    dividerDot.Position = UDim2.new(0.5, 0, 0, 88)
-    dividerDot.Size = UDim2.new(0, 6, 0, 6)
-    dividerDot.BackgroundColor3 = accent
-    dividerDot.BorderSizePixel = 0
-    dividerDot.Parent = card
-
-    local dividerDotCorner = Instance.new("UICorner")
-    dividerDotCorner.CornerRadius = UDim.new(1, 0)
-    dividerDotCorner.Parent = dividerDot
-
-    local dividerDotGlow = Instance.new("UIStroke")
-    dividerDotGlow.Color = accent
-    dividerDotGlow.Thickness = 6
-    dividerDotGlow.Transparency = 0.55
-    dividerDotGlow.Parent = dividerDot
-
-    local barBg = Instance.new("Frame")
-    barBg.AnchorPoint = Vector2.new(0.5, 0)
-    barBg.Position = UDim2.new(0.5, 0, 0, 108)
-    barBg.Size = UDim2.new(1, -70, 0, 5)
-    barBg.BackgroundColor3 = bgLight
-    barBg.BorderSizePixel = 0
-    barBg.Parent = card
-
-    local barBgCorner = Instance.new("UICorner")
-    barBgCorner.CornerRadius = UDim.new(1, 0)
-    barBgCorner.Parent = barBg
-
-    local barFill = Instance.new("Frame")
-    barFill.Size = UDim2.new(0, 0, 1, 0)
-    barFill.BackgroundColor3 = accent
-    barFill.BorderSizePixel = 0
-    barFill.Parent = barBg
-
-    local barFillCorner = Instance.new("UICorner")
-    barFillCorner.CornerRadius = UDim.new(1, 0)
-    barFillCorner.Parent = barFill
-
-    local barFillGlow = Instance.new("UIStroke")
-    barFillGlow.Color = accent
-    barFillGlow.Thickness = 6
-    barFillGlow.Transparency = 0.55
-    barFillGlow.Parent = barFill
-
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.AnchorPoint = Vector2.new(0.5, 0)
-    statusLabel.Position = UDim2.new(0.5, 0, 0, 124)
-    statusLabel.Size = UDim2.new(1, -70, 0, 14)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "..."
-    statusLabel.TextColor3 = textDim
-    statusLabel.TextSize = 10
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statusLabel.Parent = card
-
-    local pctLabel = Instance.new("TextLabel")
-    pctLabel.AnchorPoint = Vector2.new(0.5, 0)
-    pctLabel.Position = UDim2.new(0.5, 0, 0, 124)
-    pctLabel.Size = UDim2.new(1, -70, 0, 14)
-    pctLabel.BackgroundTransparency = 1
-    pctLabel.Text = "0%"
-    pctLabel.TextColor3 = accent
-    pctLabel.TextSize = 10
-    pctLabel.Font = Enum.Font.GothamBold
-    pctLabel.TextXAlignment = Enum.TextXAlignment.Right
-    pctLabel.Parent = card
-
-    local cardW = 360
-    local cardH = 160
-
-    tweenService:Create(
-        card,
-        TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        { Size = UDim2.new(0, cardW, 0, cardH) }
-    ):Play()
-
-    tweenService:Create(
-        titleShadow,
-        TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-        { TextTransparency = 0.8 }
-    ):Play()
-
-    tweenService:Create(
-        topBarGlow,
-        TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-        { Transparency = 0.85 }
-    ):Play()
-
-    tweenService:Create(
-        dividerDotGlow,
-        TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-        { Transparency = 0.85 }
-    ):Play()
-
-    local function setProgress(pct, text)
-        pct = math.clamp(pct, 0, 1)
-        tweenService:Create(
-            barFill,
-            TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-            { Size = UDim2.new(pct, 0, 1, 0) }
-        ):Play()
-        pctLabel.Text = string.format("%d%%", math.floor(pct * 100))
-        if text then
-            statusLabel.Text = string.upper(text)
-        end
-    end
-
-    local function destroy()
-        tweenService:Create(
-            card,
-            TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In),
-            {
-                Size = UDim2.new(0, 0, 0, 0),
-                BackgroundTransparency = 1,
-            }
-        ):Play()
-
-        tweenService:Create(
-            cardStroke,
-            TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { Transparency = 1, Thickness = 6 }
-        ):Play()
-
-        tweenService:Create(
-            innerStrokeLine,
-            TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { Transparency = 1 }
-        ):Play()
-
-        for _, item in ipairs(card:GetDescendants()) do
-            pcall(function()
-                tweenService:Create(
-                    item,
-                    TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-                    {
-                        BackgroundTransparency = 1,
-                        TextTransparency = 1,
-                        Transparency = 1,
-                    }
-                ):Play()
-            end)
-        end
-
-        task.delay(0.55, function()
-            if gui and gui.Parent then
-                gui:Destroy()
-            end
-        end)
-    end
-
-    return {
-        gui = gui,
-        setProgress = setProgress,
-        destroy = destroy,
-    }
 end
 
 local function createHUD()
@@ -2174,6 +1985,9 @@ local function updateHUD()
     elseif wallRetreatActive then
         statusText = "WALL"
         statusColor = badColor
+    elseif m1Active then
+        statusText = "M1"
+        statusColor = badColor
     elseif vCycleActive then
         statusText = "CYCLE"
         statusColor = infoColor
@@ -2284,28 +2098,68 @@ track(workspace.DescendantAdded:Connect(function(descendant)
     configureInfinitePrompt(descendant)
 end))
 
-loadingScreen = createLoadingScreen()
+local function getLoadingScreenBuilder()
+    local ok, result = pcall(function()
+        local source = game:HttpGet(loadingUrl)
+        if not source or source == "" then
+            error("empty response from " .. loadingUrl)
+        end
+        local chunk = loadstring(source)
+        if not chunk then
+            error("loadstring returned nil for Loading.lua")
+        end
+        return chunk()
+    end)
 
-local steps = {
-    { 0.10, "waking up services" },
-    { 0.28, "linking modules" },
-    { 0.48, "building ui" },
-    { 0.68, "applying instant interact" },
-    { 0.85, "binding antivoid + antiidle" },
-    { 1.00, "ready" },
-}
+    if not ok then
+        warn("[LarpingHub] Failed to fetch loading screen: " .. tostring(result))
+        return nil
+    end
 
-for _, step in ipairs(steps) do
-    loadingScreen.setProgress(step[1], step[2])
-    task.wait(0.16)
+    if type(result) ~= "function" then
+        warn("[LarpingHub] Loading.lua did not return a function (got " .. type(result) .. ")")
+        return nil
+    end
+
+    return result
 end
 
-task.wait(0.55)
+local createLoadingScreen = getLoadingScreenBuilder()
 
-loadingScreen.destroy()
-loadingScreen = nil
+if createLoadingScreen then
+    local ok, screen = pcall(createLoadingScreen)
+    if ok and screen and screen.setProgress and screen.destroy then
+        loadingScreen = screen
+    else
+        warn("[LarpingHub] Loading screen builder returned an invalid object")
+        loadingScreen = nil
+    end
+end
 
-task.wait(0.5)
+if loadingScreen then
+    local steps = {
+        { 0.10, "waking up services" },
+        { 0.28, "linking modules" },
+        { 0.48, "building ui" },
+        { 0.68, "applying instant interact" },
+        { 0.85, "binding antivoid + antiidle" },
+        { 1.00, "ready" },
+    }
+
+    for _, step in ipairs(steps) do
+        loadingScreen.setProgress(step[1], step[2])
+        task.wait(0.16)
+    end
+
+    task.wait(0.55)
+
+    pcall(function()
+        loadingScreen.destroy()
+    end)
+    loadingScreen = nil
+
+    task.wait(0.5)
+end
 
 hud = createHUD()
 sidebar = createSidebar()
@@ -2346,6 +2200,7 @@ characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     cachedLookFlat = Vector3.new(0, 0, -1)
     recentMovers = {}
     wallRetreatActive = false
+    m1Active = false
     clearWallCache()
     resetParticleTracking()
     lastTargetDamageTime = 0
@@ -2380,6 +2235,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
     if target and isTrulyDead(target) then
         target = nil
         wallRetreatActive = false
+        m1Active = false
         clearWallCache()
     end
 
@@ -2406,6 +2262,8 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
 
     local finisher = isFinisherTarget()
     local grabbed = hasGrabbedFolder(target)
+    local m1On = hasM1Attribute(target)
+    m1Active = m1On
 
     if grabbed then
         if not wallRetreatActive then
@@ -2436,6 +2294,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
                 end
             end
             cachedVictimHasParticles = false
+            particleContinuousStart = 0
         else
             local now = tick()
 
@@ -2444,13 +2303,20 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
                 cachedVictimHasParticles = victimHasParticles()
                 if cachedVictimHasParticles then
                     lastParticleSeenAt = now
+                    if particleContinuousStart == 0 then
+                        particleContinuousStart = now
+                    end
+                else
+                    particleContinuousStart = 0
                 end
             end
 
             local particleWindow = (now - lastParticleSeenAt) < particleGracePeriod
             local victimRecentlyDamaged = (now - lastTargetDamageTime) < targetDamageMemory
+            local persistentAura = particleContinuousStart > 0
+                and (now - particleContinuousStart) >= persistentParticleThreshold
 
-            if particleWindow and not victimRecentlyDamaged then
+            if particleWindow and not victimRecentlyDamaged and not persistentAura then
                 if not recoveryActive then
                     setRecoveryMode(true)
                 end
@@ -2464,9 +2330,13 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
                 end
             end
         end
+    else
+        if particleRecoveryActive then
+            particleRecoveryActive = false
+        end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive then
+    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On then
         local threats = countNearbyThreats()
         local dps = getRecentSelfDps()
 
@@ -2479,7 +2349,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive then
+    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On then
         if not recoveryActive then
             setRecoveryMode(true)
         end
@@ -2494,6 +2364,8 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
 
     if wallRetreatActive then
         moveToWall(targetRoot, deltaTime)
+    elseif m1On then
+        teleportBehindM1(targetRoot)
     elseif teamerParking or activeRecovery then
         parkCharacter()
     elseif tick() < combatStickyUntil then
@@ -2678,6 +2550,7 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         resetParticleTracking()
         lastTargetDamageTime = 0
         wallRetreatActive = false
+        m1Active = false
         clearWallCache()
         if not victimCamEnabled then restoreCamera() end
         return
