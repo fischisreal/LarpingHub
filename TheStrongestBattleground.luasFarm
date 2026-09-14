@@ -121,6 +121,7 @@ local predictionPingCap = 0.28
 local wallRaycastDistance = 500
 local wallStopOffset = 3
 local wallRetreatSpeedFallback = 20
+local wallRecalcDistance = 40
 
 local manualRecoveryCooldownTime = 4
 local manualRecoveryCooldown = 0
@@ -220,6 +221,9 @@ local particleRecoveryActive = false
 local recentMovers = {}
 
 local wallRetreatActive = false
+local cachedWallCFrame = nil
+local cachedWallTarget = nil
+local cachedWallOrigin = nil
 
 local function track(connection)
     trackedConnections[#trackedConnections + 1] = connection
@@ -454,12 +458,19 @@ local function resetParticleTracking()
     particleRecoveryActive = false
 end
 
+local function clearWallCache()
+    cachedWallCFrame = nil
+    cachedWallTarget = nil
+    cachedWallOrigin = nil
+end
+
 local function setTarget(newTarget)
     if newTarget ~= target then
         previousTarget = target
         resetParticleTracking()
         lastTargetDamageTime = 0
         wallRetreatActive = false
+        clearWallCache()
     end
     target = newTarget
 end
@@ -754,12 +765,10 @@ local function moveCharacterBehind(targetRoot, deltaTime)
     end
 end
 
-local function moveToWall(targetRoot, deltaTime)
-    local character = localPlayer.Character
+local function computeWallCFrame(targetRoot, character)
     local root = character and getRoot(character)
-    if not root then return end
+    if not root then return nil end
 
-    local humanoid = getHumanoid(character)
     local myPos = root.Position
     local targetPos = targetRoot and targetRoot.Position or myPos
 
@@ -795,8 +804,31 @@ local function moveToWall(targetRoot, deltaTime)
         faceDir = Vector3.new(0, 0, -1)
     end
 
-    local base = CFrame.lookAt(destination, destination + faceDir.Unit)
-    local newCF = base * CFrame.Angles(-characterDownTilt, 0, 0)
+    return CFrame.lookAt(destination, destination + faceDir.Unit)
+end
+
+local function moveToWall(targetRoot, deltaTime)
+    local character = localPlayer.Character
+    local root = character and getRoot(character)
+    if not root then return end
+
+    local humanoid = getHumanoid(character)
+    local myPos = root.Position
+
+    local validCache = cachedWallCFrame
+        and cachedWallTarget == target
+        and cachedWallOrigin
+        and (myPos - cachedWallOrigin).Magnitude < wallRecalcDistance
+
+    if not validCache then
+        cachedWallCFrame = computeWallCFrame(targetRoot, character)
+        cachedWallTarget = target
+        cachedWallOrigin = myPos
+    end
+
+    if not cachedWallCFrame then return end
+
+    local newCF = cachedWallCFrame * CFrame.Angles(-characterDownTilt, 0, 0)
     applySmoothCFrame(root, newCF, deltaTime)
 
     if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Running then
@@ -885,6 +917,7 @@ local function exitAllRecovery()
     teamerParkUntil = 0
     teamerParkToken += 1
     manualRecoveryCooldown = tick() + manualRecoveryCooldownTime
+    clearWallCache()
     if macroActive then
         macroActive = false
         macroToken += 1
@@ -1476,6 +1509,7 @@ local function stopEverything()
     teamerParkUntil = 0
     teamerParkToken += 1
     wallRetreatActive = false
+    clearWallCache()
     resetParticleTracking()
     target = nil
     previousTarget = nil
@@ -1527,7 +1561,7 @@ local function stopEverything()
     pcall(function()
         local pg = localPlayer:FindFirstChild("PlayerGui")
         if pg then
-            for _, name in ipairs({ "ParkCamHUD", "ParkCamHelp", "ParkCamSidebar", "ParkCamLoading" }) do
+            for _, name in ipairs({ "ParkCamHUD", "ParkCamHelp", "ParkCamSidebar", "LarpingHubLoading" }) do
                 local ui = pg:FindFirstChild(name)
                 if ui then ui:Destroy() end
             end
@@ -1539,50 +1573,20 @@ end
 
 local function createLoadingScreen()
     local gui = Instance.new("ScreenGui")
-    gui.Name = "ParkCamLoading"
+    gui.Name = "LarpingHubLoading"
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.DisplayOrder = 1000
     gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
-    local backdrop = Instance.new("Frame")
-    backdrop.Size = UDim2.new(1, 0, 1, 0)
-    backdrop.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
-    backdrop.BackgroundTransparency = 0
-    backdrop.BorderSizePixel = 0
-    backdrop.Parent = gui
-
-    local glowOuter = Instance.new("Frame")
-    glowOuter.Size = UDim2.new(0, 520, 0, 520)
-    glowOuter.Position = UDim2.new(0.5, -260, 0.5, -260)
-    glowOuter.BackgroundColor3 = accent
-    glowOuter.BackgroundTransparency = 0.88
-    glowOuter.BorderSizePixel = 0
-    glowOuter.Parent = backdrop
-
-    local glowOuterCorner = Instance.new("UICorner")
-    glowOuterCorner.CornerRadius = UDim.new(1, 0)
-    glowOuterCorner.Parent = glowOuter
-
-    local glowInner = Instance.new("Frame")
-    glowInner.Size = UDim2.new(0, 340, 0, 340)
-    glowInner.Position = UDim2.new(0.5, -170, 0.5, -170)
-    glowInner.BackgroundColor3 = accentAlt
-    glowInner.BackgroundTransparency = 0.92
-    glowInner.BorderSizePixel = 0
-    glowInner.Parent = backdrop
-
-    local glowInnerCorner = Instance.new("UICorner")
-    glowInnerCorner.CornerRadius = UDim.new(1, 0)
-    glowInnerCorner.Parent = glowInner
-
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(0, 460, 0, 210)
-    card.Position = UDim2.new(0.5, -230, 0.5, -105)
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.new(0.5, 0, 0.5, 0)
+    card.Size = UDim2.new(0, 0, 0, 0)
     card.BackgroundColor3 = bgDark
     card.BackgroundTransparency = 0.05
     card.BorderSizePixel = 0
-    card.Parent = backdrop
+    card.Parent = gui
 
     local cardCorner = Instance.new("UICorner")
     cardCorner.CornerRadius = UDim.new(0, 20)
@@ -1591,81 +1595,86 @@ local function createLoadingScreen()
     local cardStroke = Instance.new("UIStroke")
     cardStroke.Color = accent
     cardStroke.Thickness = 1.5
-    cardStroke.Transparency = 0.25
+    cardStroke.Transparency = 0.15
     cardStroke.Parent = card
 
-    local innerBorder = Instance.new("Frame")
-    innerBorder.Size = UDim2.new(1, -10, 1, -10)
-    innerBorder.Position = UDim2.new(0, 5, 0, 5)
-    innerBorder.BackgroundTransparency = 1
-    innerBorder.BorderSizePixel = 0
-    innerBorder.Parent = card
+    local innerStroke = Instance.new("Frame")
+    innerStroke.Size = UDim2.new(1, -12, 1, -12)
+    innerStroke.Position = UDim2.new(0, 6, 0, 6)
+    innerStroke.BackgroundTransparency = 1
+    innerStroke.BorderSizePixel = 0
+    innerStroke.Parent = card
 
-    local innerBorderStroke = Instance.new("UIStroke")
-    innerBorderStroke.Color = accent
-    innerBorderStroke.Thickness = 1
-    innerBorderStroke.Transparency = 0.82
-    innerBorderStroke.Parent = innerBorder
+    local innerStrokeCorner = Instance.new("UICorner")
+    innerStrokeCorner.CornerRadius = UDim.new(0, 15)
+    innerStrokeCorner.Parent = innerStroke
 
-    local innerBorderCorner = Instance.new("UICorner")
-    innerBorderCorner.CornerRadius = UDim.new(0, 16)
-    innerBorderCorner.Parent = innerBorder
+    local innerStrokeLine = Instance.new("UIStroke")
+    innerStrokeLine.Color = accent
+    innerStrokeLine.Thickness = 1
+    innerStrokeLine.Transparency = 0.78
+    innerStrokeLine.Parent = innerStroke
 
-    local topAccent = Instance.new("Frame")
-    topAccent.Size = UDim2.new(0, 90, 0, 3)
-    topAccent.Position = UDim2.new(0.5, -45, 0, 14)
-    topAccent.BackgroundColor3 = accent
-    topAccent.BorderSizePixel = 0
-    topAccent.Parent = card
+    local topBar = Instance.new("Frame")
+    topBar.AnchorPoint = Vector2.new(0.5, 0)
+    topBar.Position = UDim2.new(0.5, 0, 0, 12)
+    topBar.Size = UDim2.new(0, 80, 0, 3)
+    topBar.BackgroundColor3 = accent
+    topBar.BorderSizePixel = 0
+    topBar.Parent = card
 
-    local topAccentCorner = Instance.new("UICorner")
-    topAccentCorner.CornerRadius = UDim.new(1, 0)
-    topAccentCorner.Parent = topAccent
+    local topBarCorner = Instance.new("UICorner")
+    topBarCorner.CornerRadius = UDim.new(1, 0)
+    topBarCorner.Parent = topBar
 
-    local topAccentGlow = Instance.new("UIStroke")
-    topAccentGlow.Color = accent
-    topAccentGlow.Thickness = 4
-    topAccentGlow.Transparency = 0.6
-    topAccentGlow.Parent = topAccent
+    local topBarGlow = Instance.new("UIStroke")
+    topBarGlow.Color = accent
+    topBarGlow.Thickness = 5
+    topBarGlow.Transparency = 0.55
+    topBarGlow.Parent = topBar
 
     local titleShadow = Instance.new("TextLabel")
-    titleShadow.Size = UDim2.new(1, 0, 0, 56)
-    titleShadow.Position = UDim2.new(0, 0, 0, 36)
+    titleShadow.AnchorPoint = Vector2.new(0.5, 0)
+    titleShadow.Position = UDim2.new(0.5, 0, 0, 32)
+    titleShadow.Size = UDim2.new(1, 0, 0, 46)
     titleShadow.BackgroundTransparency = 1
     titleShadow.Text = "LARPING HUB"
     titleShadow.TextColor3 = accent
     titleShadow.TextTransparency = 0.55
-    titleShadow.TextSize = 46
+    titleShadow.TextSize = 38
     titleShadow.Font = Enum.Font.GothamBlack
     titleShadow.Parent = card
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 56)
-    title.Position = UDim2.new(0, 0, 0, 36)
+    title.AnchorPoint = Vector2.new(0.5, 0)
+    title.Position = UDim2.new(0.5, 0, 0, 32)
+    title.Size = UDim2.new(1, 0, 0, 46)
     title.BackgroundTransparency = 1
     title.Text = "LARPING HUB"
     title.TextColor3 = textColor
-    title.TextSize = 46
+    title.TextSize = 38
     title.Font = Enum.Font.GothamBlack
     title.Parent = card
 
     local titleStroke = Instance.new("UIStroke")
     titleStroke.Color = accent
     titleStroke.Thickness = 1
-    titleStroke.Transparency = 0.4
+    titleStroke.Transparency = 0.35
     titleStroke.Parent = title
 
     local divider = Instance.new("Frame")
-    divider.Size = UDim2.new(0, 220, 0, 1)
-    divider.Position = UDim2.new(0.5, -110, 0, 100)
+    divider.AnchorPoint = Vector2.new(0.5, 0.5)
+    divider.Position = UDim2.new(0.5, 0, 0, 88)
+    divider.Size = UDim2.new(0, 180, 0, 1)
     divider.BackgroundColor3 = accent
-    divider.BackgroundTransparency = 0.45
+    divider.BackgroundTransparency = 0.4
     divider.BorderSizePixel = 0
     divider.Parent = card
 
     local dividerDot = Instance.new("Frame")
+    dividerDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dividerDot.Position = UDim2.new(0.5, 0, 0, 88)
     dividerDot.Size = UDim2.new(0, 6, 0, 6)
-    dividerDot.Position = UDim2.new(0.5, -3, 0, 97)
     dividerDot.BackgroundColor3 = accent
     dividerDot.BorderSizePixel = 0
     dividerDot.Parent = card
@@ -1676,23 +1685,14 @@ local function createLoadingScreen()
 
     local dividerDotGlow = Instance.new("UIStroke")
     dividerDotGlow.Color = accent
-    dividerDotGlow.Thickness = 5
-    dividerDotGlow.Transparency = 0.65
+    dividerDotGlow.Thickness = 6
+    dividerDotGlow.Transparency = 0.55
     dividerDotGlow.Parent = dividerDot
 
-    local subtitle = Instance.new("TextLabel")
-    subtitle.Size = UDim2.new(1, 0, 0, 16)
-    subtitle.Position = UDim2.new(0, 0, 0, 112)
-    subtitle.BackgroundTransparency = 1
-    subtitle.Text = "B O O T I N G   M O D U L E S"
-    subtitle.TextColor3 = accent
-    subtitle.TextSize = 10
-    subtitle.Font = Enum.Font.GothamBold
-    subtitle.Parent = card
-
     local barBg = Instance.new("Frame")
-    barBg.Size = UDim2.new(1, -80, 0, 5)
-    barBg.Position = UDim2.new(0, 40, 0, 148)
+    barBg.AnchorPoint = Vector2.new(0.5, 0)
+    barBg.Position = UDim2.new(0.5, 0, 0, 108)
+    barBg.Size = UDim2.new(1, -70, 0, 5)
     barBg.BackgroundColor3 = bgLight
     barBg.BorderSizePixel = 0
     barBg.Parent = card
@@ -1713,13 +1713,14 @@ local function createLoadingScreen()
 
     local barFillGlow = Instance.new("UIStroke")
     barFillGlow.Color = accent
-    barFillGlow.Thickness = 5
-    barFillGlow.Transparency = 0.65
+    barFillGlow.Thickness = 6
+    barFillGlow.Transparency = 0.55
     barFillGlow.Parent = barFill
 
     local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, -80, 0, 14)
-    statusLabel.Position = UDim2.new(0, 40, 0, 164)
+    statusLabel.AnchorPoint = Vector2.new(0.5, 0)
+    statusLabel.Position = UDim2.new(0.5, 0, 0, 124)
+    statusLabel.Size = UDim2.new(1, -70, 0, 14)
     statusLabel.BackgroundTransparency = 1
     statusLabel.Text = "..."
     statusLabel.TextColor3 = textDim
@@ -1729,8 +1730,9 @@ local function createLoadingScreen()
     statusLabel.Parent = card
 
     local pctLabel = Instance.new("TextLabel")
-    pctLabel.Size = UDim2.new(1, -80, 0, 14)
-    pctLabel.Position = UDim2.new(0, 40, 0, 164)
+    pctLabel.AnchorPoint = Vector2.new(0.5, 0)
+    pctLabel.Position = UDim2.new(0.5, 0, 0, 124)
+    pctLabel.Size = UDim2.new(1, -70, 0, 14)
     pctLabel.BackgroundTransparency = 1
     pctLabel.Text = "0%"
     pctLabel.TextColor3 = accent
@@ -1739,42 +1741,38 @@ local function createLoadingScreen()
     pctLabel.TextXAlignment = Enum.TextXAlignment.Right
     pctLabel.Parent = card
 
-    task.spawn(function()
-        local up = true
-        while gui and gui.Parent do
-            local targetT = up and 0.2 or 0.75
-            tweenService:Create(
-                titleShadow,
-                TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                { TextTransparency = targetT }
-            ):Play()
-            up = not up
-            task.wait(1.1)
-        end
-    end)
+    local cardW = 360
+    local cardH = 160
 
-    task.spawn(function()
-        while gui and gui.Parent do
-            tweenService:Create(
-                glowOuter,
-                TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                { BackgroundTransparency = 0.82 }
-            ):Play()
-            task.wait(1.6)
-            tweenService:Create(
-                glowOuter,
-                TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                { BackgroundTransparency = 0.92 }
-            ):Play()
-            task.wait(1.6)
-        end
-    end)
+    tweenService:Create(
+        card,
+        TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        { Size = UDim2.new(0, cardW, 0, cardH) }
+    ):Play()
+
+    tweenService:Create(
+        titleShadow,
+        TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        { TextTransparency = 0.8 }
+    ):Play()
+
+    tweenService:Create(
+        topBarGlow,
+        TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        { Transparency = 0.85 }
+    ):Play()
+
+    tweenService:Create(
+        dividerDotGlow,
+        TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        { Transparency = 0.85 }
+    ):Play()
 
     local function setProgress(pct, text)
         pct = math.clamp(pct, 0, 1)
         tweenService:Create(
             barFill,
-            TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
             { Size = UDim2.new(pct, 0, 1, 0) }
         ):Play()
         pctLabel.Text = string.format("%d%%", math.floor(pct * 100))
@@ -1786,25 +1784,30 @@ local function createLoadingScreen()
     local function destroy()
         tweenService:Create(
             card,
-            TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In),
             {
                 Size = UDim2.new(0, 0, 0, 0),
-                Position = UDim2.new(0.5, 0, 0.5, 0),
                 BackgroundTransparency = 1,
             }
         ):Play()
 
         tweenService:Create(
             cardStroke,
-            TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { Transparency = 1, Thickness = 8 }
+            TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            { Transparency = 1, Thickness = 6 }
+        ):Play()
+
+        tweenService:Create(
+            innerStrokeLine,
+            TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            { Transparency = 1 }
         ):Play()
 
         for _, item in ipairs(card:GetDescendants()) do
             pcall(function()
                 tweenService:Create(
                     item,
-                    TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+                    TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
                     {
                         BackgroundTransparency = 1,
                         TextTransparency = 1,
@@ -1814,37 +1817,11 @@ local function createLoadingScreen()
             end)
         end
 
-        tweenService:Create(
-            glowOuter,
-            TweenInfo.new(0.7, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-            {
-                Size = UDim2.new(0, 900, 0, 900),
-                Position = UDim2.new(0.5, -450, 0.5, -450),
-                BackgroundTransparency = 1,
-            }
-        ):Play()
-
-        tweenService:Create(
-            glowInner,
-            TweenInfo.new(0.7, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-            {
-                Size = UDim2.new(0, 600, 0, 600),
-                Position = UDim2.new(0.5, -300, 0.5, -300),
-                BackgroundTransparency = 1,
-            }
-        ):Play()
-
-        tweenService:Create(
-            backdrop,
-            TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1 }
-        ):Play()
-
-        task.wait(0.7)
-
-        if gui and gui.Parent then
-            gui:Destroy()
-        end
+        task.delay(0.55, function()
+            if gui and gui.Parent then
+                gui:Destroy()
+            end
+        end)
     end
 
     return {
@@ -2310,25 +2287,25 @@ end))
 loadingScreen = createLoadingScreen()
 
 local steps = {
-    { 0.08, "waking up services" },
-    { 0.22, "linking modules" },
-    { 0.38, "building ui" },
-    { 0.55, "applying instant interact" },
-    { 0.70, "binding antivoid + antiidle" },
-    { 0.85, "attaching health watchers" },
-    { 0.95, "final touches" },
+    { 0.10, "waking up services" },
+    { 0.28, "linking modules" },
+    { 0.48, "building ui" },
+    { 0.68, "applying instant interact" },
+    { 0.85, "binding antivoid + antiidle" },
     { 1.00, "ready" },
 }
 
 for _, step in ipairs(steps) do
     loadingScreen.setProgress(step[1], step[2])
-    task.wait(0.12)
+    task.wait(0.16)
 end
 
-task.wait(0.45)
+task.wait(0.55)
 
 loadingScreen.destroy()
 loadingScreen = nil
+
+task.wait(0.5)
 
 hud = createHUD()
 sidebar = createSidebar()
@@ -2369,6 +2346,7 @@ characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     cachedLookFlat = Vector3.new(0, 0, -1)
     recentMovers = {}
     wallRetreatActive = false
+    clearWallCache()
     resetParticleTracking()
     lastTargetDamageTime = 0
 
@@ -2402,6 +2380,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
     if target and isTrulyDead(target) then
         target = nil
         wallRetreatActive = false
+        clearWallCache()
     end
 
     if not target then
@@ -2429,11 +2408,20 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
     local grabbed = hasGrabbedFolder(target)
 
     if grabbed then
+        if not wallRetreatActive then
+            clearWallCache()
+        end
         wallRetreatActive = true
         if recoveryActive then
             recoveryActive = false
         end
+        if particleRecoveryActive then
+            particleRecoveryActive = false
+        end
     else
+        if wallRetreatActive then
+            clearWallCache()
+        end
         wallRetreatActive = false
     end
 
@@ -2690,6 +2678,7 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         resetParticleTracking()
         lastTargetDamageTime = 0
         wallRetreatActive = false
+        clearWallCache()
         if not victimCamEnabled then restoreCamera() end
         return
     end
