@@ -122,6 +122,9 @@ local wallRaycastDistance = 500
 local wallStopOffset = 3
 local wallRetreatSpeedFallback = 20
 
+local manualRecoveryCooldownTime = 4
+local manualRecoveryCooldown = 0
+
 local recoveryOnAttack = true
 local instantInteractEnabled = true
 
@@ -787,7 +790,7 @@ local function moveToWall(targetRoot, deltaTime)
 
     destination = Vector3.new(destination.X, myPos.Y, destination.Z)
 
-    local faceDir = Vector3.new(targetPos.X - destination.X, 0, targetPos.Z - destination.Z)
+    local faceDir = Vector3.new(away.X, 0, away.Z)
     if faceDir.Magnitude < 0.05 then
         faceDir = Vector3.new(0, 0, -1)
     end
@@ -867,6 +870,7 @@ local function snapToCombat(targetRoot)
 end
 
 local function setRecoveryMode(enabledState)
+    if enabledState and tick() < manualRecoveryCooldown then return end
     recoveryActive = enabledState
 
     if enabledState then
@@ -880,6 +884,7 @@ local function exitAllRecovery()
     wallRetreatActive = false
     teamerParkUntil = 0
     teamerParkToken += 1
+    manualRecoveryCooldown = tick() + manualRecoveryCooldownTime
     if macroActive then
         macroActive = false
         macroToken += 1
@@ -998,6 +1003,7 @@ end
 local function triggerTeamerPark(duration)
     if vCycleActive then return end
     if isFinisherTarget() then return end
+    if tick() < manualRecoveryCooldown then return end
 
     local now = tick()
     local newEnd = now + (duration or teamerParkTime)
@@ -1013,6 +1019,7 @@ local function checkTeamerThreat()
     if vCycleActive then return false end
     if macroActive then return false end
     if isFinisherTarget() then return false end
+    if tick() < manualRecoveryCooldown then return false end
 
     local recent = countRecentDamageEvents()
     if recent >= damageBurstCount then
@@ -1540,59 +1547,158 @@ local function createLoadingScreen()
 
     local backdrop = Instance.new("Frame")
     backdrop.Size = UDim2.new(1, 0, 1, 0)
-    backdrop.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
+    backdrop.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
+    backdrop.BackgroundTransparency = 0
     backdrop.BorderSizePixel = 0
     backdrop.Parent = gui
 
+    local glowOuter = Instance.new("Frame")
+    glowOuter.Size = UDim2.new(0, 520, 0, 520)
+    glowOuter.Position = UDim2.new(0.5, -260, 0.5, -260)
+    glowOuter.BackgroundColor3 = accent
+    glowOuter.BackgroundTransparency = 0.88
+    glowOuter.BorderSizePixel = 0
+    glowOuter.Parent = backdrop
+
+    local glowOuterCorner = Instance.new("UICorner")
+    glowOuterCorner.CornerRadius = UDim.new(1, 0)
+    glowOuterCorner.Parent = glowOuter
+
+    local glowInner = Instance.new("Frame")
+    glowInner.Size = UDim2.new(0, 340, 0, 340)
+    glowInner.Position = UDim2.new(0.5, -170, 0.5, -170)
+    glowInner.BackgroundColor3 = accentAlt
+    glowInner.BackgroundTransparency = 0.92
+    glowInner.BorderSizePixel = 0
+    glowInner.Parent = backdrop
+
+    local glowInnerCorner = Instance.new("UICorner")
+    glowInnerCorner.CornerRadius = UDim.new(1, 0)
+    glowInnerCorner.Parent = glowInner
+
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(0, 420, 0, 200)
-    card.Position = UDim2.new(0.5, -210, 0.5, -100)
+    card.Size = UDim2.new(0, 460, 0, 210)
+    card.Position = UDim2.new(0.5, -230, 0.5, -105)
     card.BackgroundColor3 = bgDark
-    card.BackgroundTransparency = 0.1
+    card.BackgroundTransparency = 0.05
     card.BorderSizePixel = 0
     card.Parent = backdrop
 
     local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = UDim.new(0, 14)
+    cardCorner.CornerRadius = UDim.new(0, 20)
     cardCorner.Parent = card
 
     local cardStroke = Instance.new("UIStroke")
     cardStroke.Color = accent
-    cardStroke.Thickness = 1.2
-    cardStroke.Transparency = 0.4
+    cardStroke.Thickness = 1.5
+    cardStroke.Transparency = 0.25
     cardStroke.Parent = card
 
+    local innerBorder = Instance.new("Frame")
+    innerBorder.Size = UDim2.new(1, -10, 1, -10)
+    innerBorder.Position = UDim2.new(0, 5, 0, 5)
+    innerBorder.BackgroundTransparency = 1
+    innerBorder.BorderSizePixel = 0
+    innerBorder.Parent = card
+
+    local innerBorderStroke = Instance.new("UIStroke")
+    innerBorderStroke.Color = accent
+    innerBorderStroke.Thickness = 1
+    innerBorderStroke.Transparency = 0.82
+    innerBorderStroke.Parent = innerBorder
+
+    local innerBorderCorner = Instance.new("UICorner")
+    innerBorderCorner.CornerRadius = UDim.new(0, 16)
+    innerBorderCorner.Parent = innerBorder
+
+    local topAccent = Instance.new("Frame")
+    topAccent.Size = UDim2.new(0, 90, 0, 3)
+    topAccent.Position = UDim2.new(0.5, -45, 0, 14)
+    topAccent.BackgroundColor3 = accent
+    topAccent.BorderSizePixel = 0
+    topAccent.Parent = card
+
+    local topAccentCorner = Instance.new("UICorner")
+    topAccentCorner.CornerRadius = UDim.new(1, 0)
+    topAccentCorner.Parent = topAccent
+
+    local topAccentGlow = Instance.new("UIStroke")
+    topAccentGlow.Color = accent
+    topAccentGlow.Thickness = 4
+    topAccentGlow.Transparency = 0.6
+    topAccentGlow.Parent = topAccent
+
+    local titleShadow = Instance.new("TextLabel")
+    titleShadow.Size = UDim2.new(1, 0, 0, 56)
+    titleShadow.Position = UDim2.new(0, 0, 0, 36)
+    titleShadow.BackgroundTransparency = 1
+    titleShadow.Text = "LARPING HUB"
+    titleShadow.TextColor3 = accent
+    titleShadow.TextTransparency = 0.55
+    titleShadow.TextSize = 46
+    titleShadow.Font = Enum.Font.GothamBlack
+    titleShadow.Parent = card
+
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -32, 0, 32)
-    title.Position = UDim2.new(0, 16, 0, 22)
+    title.Size = UDim2.new(1, 0, 0, 56)
+    title.Position = UDim2.new(0, 0, 0, 36)
     title.BackgroundTransparency = 1
-    title.Text = "PARK CAM"
+    title.Text = "LARPING HUB"
     title.TextColor3 = textColor
-    title.TextSize = 26
+    title.TextSize = 46
     title.Font = Enum.Font.GothamBlack
-    title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = card
 
+    local titleStroke = Instance.new("UIStroke")
+    titleStroke.Color = accent
+    titleStroke.Thickness = 1
+    titleStroke.Transparency = 0.4
+    titleStroke.Parent = title
+
+    local divider = Instance.new("Frame")
+    divider.Size = UDim2.new(0, 220, 0, 1)
+    divider.Position = UDim2.new(0.5, -110, 0, 100)
+    divider.BackgroundColor3 = accent
+    divider.BackgroundTransparency = 0.45
+    divider.BorderSizePixel = 0
+    divider.Parent = card
+
+    local dividerDot = Instance.new("Frame")
+    dividerDot.Size = UDim2.new(0, 6, 0, 6)
+    dividerDot.Position = UDim2.new(0.5, -3, 0, 97)
+    dividerDot.BackgroundColor3 = accent
+    dividerDot.BorderSizePixel = 0
+    dividerDot.Parent = card
+
+    local dividerDotCorner = Instance.new("UICorner")
+    dividerDotCorner.CornerRadius = UDim.new(1, 0)
+    dividerDotCorner.Parent = dividerDot
+
+    local dividerDotGlow = Instance.new("UIStroke")
+    dividerDotGlow.Color = accent
+    dividerDotGlow.Thickness = 5
+    dividerDotGlow.Transparency = 0.65
+    dividerDotGlow.Parent = dividerDot
+
     local subtitle = Instance.new("TextLabel")
-    subtitle.Size = UDim2.new(1, -32, 0, 16)
-    subtitle.Position = UDim2.new(0, 16, 0, 56)
+    subtitle.Size = UDim2.new(1, 0, 0, 16)
+    subtitle.Position = UDim2.new(0, 0, 0, 112)
     subtitle.BackgroundTransparency = 1
-    subtitle.Text = "booting modules"
+    subtitle.Text = "B O O T I N G   M O D U L E S"
     subtitle.TextColor3 = accent
-    subtitle.TextSize = 12
-    subtitle.Font = Enum.Font.GothamMedium
-    subtitle.TextXAlignment = Enum.TextXAlignment.Left
+    subtitle.TextSize = 10
+    subtitle.Font = Enum.Font.GothamBold
     subtitle.Parent = card
 
     local barBg = Instance.new("Frame")
-    barBg.Size = UDim2.new(1, -32, 0, 8)
-    barBg.Position = UDim2.new(0, 16, 0, 100)
+    barBg.Size = UDim2.new(1, -80, 0, 5)
+    barBg.Position = UDim2.new(0, 40, 0, 148)
     barBg.BackgroundColor3 = bgLight
     barBg.BorderSizePixel = 0
     barBg.Parent = card
 
     local barBgCorner = Instance.new("UICorner")
-    barBgCorner.CornerRadius = UDim.new(0, 4)
+    barBgCorner.CornerRadius = UDim.new(1, 0)
     barBgCorner.Parent = barBg
 
     local barFill = Instance.new("Frame")
@@ -1602,36 +1708,67 @@ local function createLoadingScreen()
     barFill.Parent = barBg
 
     local barFillCorner = Instance.new("UICorner")
-    barFillCorner.CornerRadius = UDim.new(0, 4)
+    barFillCorner.CornerRadius = UDim.new(1, 0)
     barFillCorner.Parent = barFill
 
-    local barGlow = Instance.new("UIStroke")
-    barGlow.Color = accent
-    barGlow.Thickness = 1
-    barGlow.Transparency = 0.4
-    barGlow.Parent = barFill
-
-    local pctLabel = Instance.new("TextLabel")
-    pctLabel.Size = UDim2.new(1, -32, 0, 16)
-    pctLabel.Position = UDim2.new(0, 16, 0, 120)
-    pctLabel.BackgroundTransparency = 1
-    pctLabel.Text = "0%"
-    pctLabel.TextColor3 = textDim
-    pctLabel.TextSize = 11
-    pctLabel.Font = Enum.Font.Gotham
-    pctLabel.TextXAlignment = Enum.TextXAlignment.Left
-    pctLabel.Parent = card
+    local barFillGlow = Instance.new("UIStroke")
+    barFillGlow.Color = accent
+    barFillGlow.Thickness = 5
+    barFillGlow.Transparency = 0.65
+    barFillGlow.Parent = barFill
 
     local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, -32, 0, 22)
-    statusLabel.Position = UDim2.new(0, 16, 0, 148)
+    statusLabel.Size = UDim2.new(1, -80, 0, 14)
+    statusLabel.Position = UDim2.new(0, 40, 0, 164)
     statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "Initializing..."
-    statusLabel.TextColor3 = textColor
-    statusLabel.TextSize = 13
-    statusLabel.Font = Enum.Font.GothamMedium
+    statusLabel.Text = "..."
+    statusLabel.TextColor3 = textDim
+    statusLabel.TextSize = 10
+    statusLabel.Font = Enum.Font.Gotham
     statusLabel.TextXAlignment = Enum.TextXAlignment.Left
     statusLabel.Parent = card
+
+    local pctLabel = Instance.new("TextLabel")
+    pctLabel.Size = UDim2.new(1, -80, 0, 14)
+    pctLabel.Position = UDim2.new(0, 40, 0, 164)
+    pctLabel.BackgroundTransparency = 1
+    pctLabel.Text = "0%"
+    pctLabel.TextColor3 = accent
+    pctLabel.TextSize = 10
+    pctLabel.Font = Enum.Font.GothamBold
+    pctLabel.TextXAlignment = Enum.TextXAlignment.Right
+    pctLabel.Parent = card
+
+    task.spawn(function()
+        local up = true
+        while gui and gui.Parent do
+            local targetT = up and 0.2 or 0.75
+            tweenService:Create(
+                titleShadow,
+                TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                { TextTransparency = targetT }
+            ):Play()
+            up = not up
+            task.wait(1.1)
+        end
+    end)
+
+    task.spawn(function()
+        while gui and gui.Parent do
+            tweenService:Create(
+                glowOuter,
+                TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                { BackgroundTransparency = 0.82 }
+            ):Play()
+            task.wait(1.6)
+            tweenService:Create(
+                glowOuter,
+                TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                { BackgroundTransparency = 0.92 }
+            ):Play()
+            task.wait(1.6)
+        end
+    end)
 
     local function setProgress(pct, text)
         pct = math.clamp(pct, 0, 1)
@@ -1642,44 +1779,72 @@ local function createLoadingScreen()
         ):Play()
         pctLabel.Text = string.format("%d%%", math.floor(pct * 100))
         if text then
-            statusLabel.Text = text
+            statusLabel.Text = string.upper(text)
         end
     end
 
     local function destroy()
         tweenService:Create(
-            backdrop,
-            TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1 }
-        ):Play()
-        tweenService:Create(
             card,
-            TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1 }
+            TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            {
+                Size = UDim2.new(0, 0, 0, 0),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                BackgroundTransparency = 1,
+            }
         ):Play()
+
         tweenService:Create(
             cardStroke,
-            TweenInfo.new(0.3),
-            { Transparency = 1 }
+            TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            { Transparency = 1, Thickness = 8 }
         ):Play()
 
         for _, item in ipairs(card:GetDescendants()) do
-            if item:IsA("TextLabel") or item:IsA("Frame") or item:IsA("UIStroke") then
-                pcall(function()
-                    tweenService:Create(
-                        item,
-                        TweenInfo.new(0.3),
-                        { BackgroundTransparency = 1, TextTransparency = 1, Transparency = 1 }
-                    ):Play()
-                end)
-            end
+            pcall(function()
+                tweenService:Create(
+                    item,
+                    TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+                    {
+                        BackgroundTransparency = 1,
+                        TextTransparency = 1,
+                        Transparency = 1,
+                    }
+                ):Play()
+            end)
         end
 
-        task.delay(0.4, function()
-            if gui and gui.Parent then
-                gui:Destroy()
-            end
-        end)
+        tweenService:Create(
+            glowOuter,
+            TweenInfo.new(0.7, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {
+                Size = UDim2.new(0, 900, 0, 900),
+                Position = UDim2.new(0.5, -450, 0.5, -450),
+                BackgroundTransparency = 1,
+            }
+        ):Play()
+
+        tweenService:Create(
+            glowInner,
+            TweenInfo.new(0.7, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {
+                Size = UDim2.new(0, 600, 0, 600),
+                Position = UDim2.new(0.5, -300, 0.5, -300),
+                BackgroundTransparency = 1,
+            }
+        ):Play()
+
+        tweenService:Create(
+            backdrop,
+            TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1 }
+        ):Play()
+
+        task.wait(0.7)
+
+        if gui and gui.Parent then
+            gui:Destroy()
+        end
     end
 
     return {
@@ -1995,7 +2160,7 @@ local function createHelpPanel()
     })
 
     y = section(y, "SYSTEM", {
-        "C                cancel ALL recovery instantly",
+        "C                cancel ALL recovery (4s cooldown)",
         "M               manual recovery",
         "V                toggle V-cycle",
         "P                toggle prediction",
@@ -2145,21 +2310,25 @@ end))
 loadingScreen = createLoadingScreen()
 
 local steps = {
-    { 0.05, "Waking up services..." },
-    { 0.15, "Building HUD..." },
-    { 0.30, "Building sidebar..." },
-    { 0.45, "Building keybind panel..." },
-    { 0.60, "Applying instant interact..." },
-    { 0.72, "Binding AntiVoid + AntiIdle..." },
-    { 0.85, "Attaching health watchers..." },
-    { 0.95, "Final touches..." },
-    { 1.00, "Ready." },
+    { 0.08, "waking up services" },
+    { 0.22, "linking modules" },
+    { 0.38, "building ui" },
+    { 0.55, "applying instant interact" },
+    { 0.70, "binding antivoid + antiidle" },
+    { 0.85, "attaching health watchers" },
+    { 0.95, "final touches" },
+    { 1.00, "ready" },
 }
 
 for _, step in ipairs(steps) do
     loadingScreen.setProgress(step[1], step[2])
-    task.wait(0.09)
+    task.wait(0.12)
 end
+
+task.wait(0.45)
+
+loadingScreen.destroy()
+loadingScreen = nil
 
 hud = createHUD()
 sidebar = createSidebar()
@@ -2174,10 +2343,6 @@ bindAntiVoid(localPlayer.Character)
 if helpGui and helpGui.gui then
     helpGui.gui.Enabled = helpEnabled
 end
-
-task.wait(0.35)
-loadingScreen.destroy()
-loadingScreen = nil
 
 characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     target = nil
@@ -2272,7 +2437,9 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         wallRetreatActive = false
     end
 
-    if particleRecoveryEnabled and not vCycleActive and not macroActive and not grabbed then
+    local manualCooldownActive = tick() < manualRecoveryCooldown
+
+    if particleRecoveryEnabled and not vCycleActive and not macroActive and not grabbed and not manualCooldownActive then
         if particleRecoverySkipsFinisher and finisher then
             if particleRecoveryActive then
                 particleRecoveryActive = false
@@ -2311,7 +2478,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed then
+    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive then
         local threats = countNearbyThreats()
         local dps = getRecentSelfDps()
 
@@ -2324,7 +2491,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed then
+    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive then
         if not recoveryActive then
             setRecoveryMode(true)
         end
@@ -2367,12 +2534,12 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         return
     end
 
-    if gameProcessed then return end
-
     if input.KeyCode == Enum.KeyCode.C then
         exitAllRecovery()
         return
     end
+
+    if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode.Zero then
         victimCamEnabled = not victimCamEnabled
