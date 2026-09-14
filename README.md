@@ -4,4 +4,4 @@
 * Alt account, i will not accept any pull request only update scripts
 * This is a Hub that will be containing several scripts, No key, and free
 
-* Safe to use!
+* Safe to use! (If you've even found this which I wont doubt)
