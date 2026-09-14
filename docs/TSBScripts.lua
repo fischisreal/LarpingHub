@@ -1,6 +1,7 @@
 local players = game:GetService("Players")
 local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
+local contextActionService = game:GetService("ContextActionService")
 local stats = game:GetService("Stats")
 local virtualInputManager = game:GetService("VirtualInputManager")
 local tweenService = game:GetService("TweenService")
@@ -94,7 +95,7 @@ local macroGoVictimWait = 1
 local macroRecoveryWait = 5
 
 local facingDotThreshold = 0.35
-local predictionHistory = 8
+local predictionHistory = 12
 local threatRadius = 30
 local threatCountTrigger = 2
 local selfHpRecoveryPct = 0.4
@@ -104,6 +105,7 @@ local selfDpsRecoveryThreshold = 25
 local promptInteractDistance = 16
 
 local parkPosition = Vector3.new(0, 2000, 0)
+local manualParkPosition = Vector3.new(0, 5000, 0)
 
 local vCycleRounds = 2
 local vCycleDelay = 0.35
@@ -113,11 +115,12 @@ local helpEnabled = false
 
 local predictionEnabled = true
 local predictionStrength = 1.0
-local predictionLookahead = 0.16
-local predictionMoveCompensation = 1.6
-local predictionMaxOffset = 38
+local predictionLookahead = 0.24
+local predictionMoveCompensation = 2.4
+local predictionMaxOffset = 55
 local predictionPingScale = 1.0
-local predictionPingCap = 0.28
+local predictionPingCap = 0.35
+local predictionVerticalBoost = 1.4
 
 local wallRaycastDistance = 500
 local wallStopOffset = 3
@@ -131,6 +134,9 @@ local manualRecoveryCooldown = 0
 
 local recoveryOnAttack = true
 local instantInteractEnabled = true
+
+local autoCombatHitDelay = 0.5
+local autoCombatKeyDelay = 0.5
 
 local positionBelow = "below"
 local positionBehind = "behind"
@@ -233,6 +239,11 @@ local cachedWallOrigin = nil
 
 local m1Active = false
 local ultedActive = false
+local manualRecoveryPark = false
+
+local autoCombatActive = false
+local autoCombatToken = 0
+local sendingVirtualInput = false
 
 local function track(connection)
     trackedConnections[#trackedConnections + 1] = connection
@@ -444,7 +455,7 @@ local function scoreTarget(model)
 
     local maxHp = math.max(humanoid.MaxHealth, 1)
     local hpPct = math.clamp(humanoid.Health / maxHp, 0, 1)
-    local hpScore = (1 - hpPct) * 40
+    local hpScore = (1 - hpPct) * 45
 
     local toMe = myRoot.Position - root.Position
     local flat = Vector3.new(toMe.X, 0, toMe.Z)
@@ -454,7 +465,7 @@ local function scoreTarget(model)
         local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
         if look.Magnitude > 0.05 then
             local dot = look.Unit:Dot(flat.Unit)
-            facingScore = math.max(0, dot) * 25
+            facingScore = math.max(0, dot) * 30
         end
     end
 
@@ -642,6 +653,7 @@ local function predictPosition(root, deltaTime)
     local lookahead = predictionLookahead + dt + getPingCompensation()
 
     local velLead = vel * (lookahead * predictionStrength)
+    velLead = Vector3.new(velLead.X, velLead.Y * predictionVerticalBoost, velLead.Z)
     local walkLead = moveDir * (predictionMoveCompensation * predictionStrength)
 
     local predicted = pos + velLead + walkLead
@@ -667,11 +679,11 @@ local function applySmoothCFrame(root, targetCF, deltaTime)
     root.CFrame = root.CFrame:Lerp(targetCF, alpha)
 end
 
-local function parkCharacter()
+local function parkCharacter(position)
     local character = localPlayer.Character
     local root = character and getRoot(character)
     if root then
-        root.CFrame = CFrame.new(parkPosition)
+        root.CFrame = CFrame.new(position or parkPosition)
         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     end
@@ -989,6 +1001,7 @@ end
 
 local function setRecoveryMode(enabledState)
     if enabledState and tick() < manualRecoveryCooldown then return end
+    if enabledState and ultedActive then return end
     recoveryActive = enabledState
 
     if enabledState then
@@ -999,9 +1012,12 @@ end
 local function forceRecovery(enabledState)
     manualRecoveryCooldown = 0
     recoveryActive = enabledState
+    manualRecoveryPark = enabledState
     if enabledState then
         particleRecoveryActive = false
-        parkCharacter()
+        parkCharacter(manualParkPosition)
+    else
+        manualRecoveryPark = false
     end
 end
 
@@ -1009,6 +1025,7 @@ local function exitAllRecovery()
     recoveryActive = false
     particleRecoveryActive = false
     wallRetreatActive = false
+    manualRecoveryPark = false
     teamerParkUntil = 0
     teamerParkToken += 1
     manualRecoveryCooldown = tick() + manualRecoveryCooldownTime
@@ -1133,6 +1150,7 @@ local function triggerTeamerPark(duration)
     if isFinisherTarget() then return end
     if tick() < manualRecoveryCooldown then return end
     if ultedActive then return end
+    if autoCombatActive then return end
 
     local now = tick()
     local newEnd = now + (duration or teamerParkTime)
@@ -1151,6 +1169,7 @@ local function checkTeamerThreat()
     if tick() < manualRecoveryCooldown then return false end
     if m1Active then return false end
     if ultedActive then return false end
+    if autoCombatActive then return false end
 
     local recent = countRecentDamageEvents()
     if recent >= damageBurstCount then
@@ -1318,6 +1337,108 @@ local function runMacro()
     end)
 end
 
+local function autoCombatHit()
+    pcall(function()
+        virtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    end)
+    task.wait(0.03)
+    pcall(function()
+        virtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end)
+end
+
+local function autoCombatPressKey(keyCode)
+    sendingVirtualInput = true
+    pcall(function()
+        virtualInputManager:SendKeyEvent(true, keyCode, false, game)
+    end)
+    task.wait(0.05)
+    pcall(function()
+        virtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end)
+    task.wait(0.05)
+    sendingVirtualInput = false
+end
+
+local function autoCombatBurst(count, myToken)
+    for i = 1, count do
+        if not autoCombatActive or stopped or myToken ~= autoCombatToken then
+            return false
+        end
+        if not isValidTarget(target) then
+            autoCombatActive = false
+            return false
+        end
+        task.wait(autoCombatHitDelay)
+        autoCombatHit()
+    end
+    return true
+end
+
+local function cancelAutoCombat()
+    if not autoCombatActive then return end
+    autoCombatActive = false
+    autoCombatToken += 1
+end
+
+local function runAutoCombat()
+    if autoCombatActive then
+        cancelAutoCombat()
+        return
+    end
+
+    if not isValidTarget(target) then return end
+
+    autoCombatToken += 1
+    autoCombatActive = true
+    local myToken = autoCombatToken
+
+    task.spawn(function()
+        while autoCombatActive and not stopped and myToken == autoCombatToken do
+            if not isValidTarget(target) then
+                autoCombatActive = false
+                return
+            end
+
+            local humanoid = getHumanoid(target)
+            if not humanoid or humanoid.Health <= 0 then
+                autoCombatActive = false
+                return
+            end
+
+            if not autoCombatBurst(4, myToken) then return end
+
+            if not autoCombatActive or myToken ~= autoCombatToken then return end
+            autoCombatPressKey(Enum.KeyCode.Q)
+            task.wait(autoCombatKeyDelay)
+
+            if not autoCombatBurst(4, myToken) then return end
+
+            if not autoCombatActive or myToken ~= autoCombatToken then return end
+            autoCombatPressKey(Enum.KeyCode.Two)
+            task.wait(autoCombatKeyDelay)
+
+            if not autoCombatBurst(4, myToken) then return end
+
+            if not autoCombatActive or myToken ~= autoCombatToken then return end
+            autoCombatPressKey(Enum.KeyCode.One)
+            task.wait(autoCombatKeyDelay)
+
+            if not autoCombatActive or myToken ~= autoCombatToken then return end
+            autoCombatPressKey(Enum.KeyCode.Q)
+            task.wait(autoCombatKeyDelay)
+
+            if not autoCombatBurst(4, myToken) then return end
+
+            if not autoCombatActive or myToken ~= autoCombatToken then return end
+            autoCombatPressKey(Enum.KeyCode.Three)
+            task.wait(autoCombatKeyDelay)
+        end
+
+        autoCombatActive = false
+    end)
+end
+
 local function onTargetHealthChanged(newHealth)
     if stopped then return end
     if not target or not isValidTarget(target) then return end
@@ -1327,6 +1448,7 @@ local function onTargetHealthChanged(newHealth)
 
     if newHealth <= 0 then
         killCount += 1
+        cancelAutoCombat()
         return
     end
 
@@ -1401,7 +1523,7 @@ local function onMyHealthChanged(newHealth)
     local humanoid = character and getHumanoid(character)
     if humanoid and humanoid.Health / math.max(humanoid.MaxHealth, 1) < selfHpRecoveryPct then
         positionMode = positionBehind
-        if smartRecoveryEnabled and not recoveryActive and not lmbHeld and not macroActive then
+        if smartRecoveryEnabled and not recoveryActive and not lmbHeld and not macroActive and not ultedActive and not autoCombatActive then
             setRecoveryMode(true)
         end
         return
@@ -1548,6 +1670,40 @@ local function bindIdle()
     end))
 end
 
+local function onQOrYAction(actionName, inputState, inputObject)
+    if inputState ~= Enum.UserInputState.Begin then
+        return Enum.ContextActionResult.Pass
+    end
+
+    if sendingVirtualInput then
+        return Enum.ContextActionResult.Pass
+    end
+
+    if stopped then
+        return Enum.ContextActionResult.Pass
+    end
+
+    if isValidTarget(target) then
+        local tRoot = getRoot(target)
+        if tRoot then
+            combatStickyUntil = tick() + meleeStickyDuration
+            snapToCombat(tRoot)
+        end
+    end
+
+    return Enum.ContextActionResult.Pass
+end
+
+pcall(function()
+    contextActionService:BindAction(
+        "LarpingHubCombatSnap",
+        onQOrYAction,
+        true,
+        Enum.KeyCode.Q,
+        Enum.KeyCode.ButtonY
+    )
+end)
+
 local function vCycle()
     if vCycleActive then
         vCycleActive = false
@@ -1620,6 +1776,13 @@ local function stopEverything()
     recentMovers = {}
     m1Active = false
     ultedActive = false
+    manualRecoveryPark = false
+    autoCombatActive = false
+    autoCombatToken += 1
+
+    pcall(function()
+        contextActionService:UnbindAction("LarpingHubCombatSnap")
+    end)
 
     pcall(function() if healthConnection then healthConnection:Disconnect() end end)
     healthConnection = nil
@@ -1965,10 +2128,12 @@ local function createHelpPanel()
         "R                next target",
         "T                clear target",
         "U                cycle position mode",
-        "0                toggle victim cam",
+        "K                toggle victim cam",
     })
 
     y = section(y, "COMBAT", {
+        "0                toggle auto combat",
+        "Q / Y btn    snap into combat range",
         "LMB (hold)  melee sticky (snap into range)",
         "1                 behind + 0.75 studs back",
         "2/3             behind position",
@@ -1978,7 +2143,7 @@ local function createHelpPanel()
 
     y = section(y, "SYSTEM", {
         "C                cancel ALL recovery (4s cooldown)",
-        "M               toggle recovery (bypasses cooldown)",
+        "M               recovery -> 0,5000,0 (bypasses cd)",
         "V                toggle V-cycle",
         "P                toggle prediction",
         "I                toggle instant interact",
@@ -2008,7 +2173,10 @@ local function updateHUD()
     local statusText
     local statusColor
 
-    if isFinisherTarget() then
+    if autoCombatActive then
+        statusText = "AUTO"
+        statusColor = badColor
+    elseif isFinisherTarget() then
         statusText = "FINISH"
         statusColor = warnColor
     elseif wallRetreatActive then
@@ -2234,9 +2402,11 @@ characterConnection = localPlayer.CharacterAdded:Connect(function(newCharacter)
     wallRetreatActive = false
     m1Active = false
     ultedActive = false
+    manualRecoveryPark = false
     clearWallCache()
     resetParticleTracking()
     lastTargetDamageTime = 0
+    cancelAutoCombat()
 
     if healthConnection then
         healthConnection:Disconnect()
@@ -2271,6 +2441,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         m1Active = false
         ultedActive = false
         clearWallCache()
+        cancelAutoCombat()
     end
 
     if not target then
@@ -2300,6 +2471,10 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
     m1Active = m1On
     ultedActive = hasUltedAttribute(target)
 
+    if ultedActive and recoveryActive and not manualRecoveryPark then
+        recoveryActive = false
+    end
+
     if grabbed then
         if not wallRetreatActive then
             clearWallCache()
@@ -2320,7 +2495,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
 
     local manualCooldownActive = tick() < manualRecoveryCooldown
 
-    if particleRecoveryEnabled and not vCycleActive and not macroActive and not grabbed and not manualCooldownActive then
+    if particleRecoveryEnabled and not vCycleActive and not macroActive and not grabbed and not manualCooldownActive and not ultedActive and not autoCombatActive then
         if particleRecoverySkipsFinisher and finisher then
             if particleRecoveryActive then
                 particleRecoveryActive = false
@@ -2371,7 +2546,7 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On then
+    if not vCycleActive and not finisher and not particleRecoveryActive and smartRecoveryEnabled and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On and not ultedActive and not autoCombatActive then
         local threats = countNearbyThreats()
         local dps = getRecentSelfDps()
 
@@ -2384,13 +2559,13 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         end
     end
 
-    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On then
+    if not vCycleActive and not finisher and not particleRecoveryActive and recoveryOnAttack and target and isAttacking(target) and not macroActive and not lmbHeld and not grabbed and not manualCooldownActive and not m1On and not ultedActive and not autoCombatActive then
         if not recoveryActive then
             setRecoveryMode(true)
         end
     end
 
-    if lmbHeld and not macroActive then
+    if (lmbHeld or autoCombatActive) and not macroActive then
         combatStickyUntil = tick() + meleeStickyDuration
     end
 
@@ -2401,8 +2576,10 @@ mainConnection = runService.RenderStepped:Connect(function(deltaTime)
         moveToWall(targetRoot, deltaTime)
     elseif m1On then
         teleportBehindM1(targetRoot)
-    elseif teamerParking or activeRecovery then
-        parkCharacter()
+    elseif activeRecovery then
+        parkCharacter(manualRecoveryPark and manualParkPosition or parkPosition)
+    elseif teamerParking then
+        parkCharacter(parkPosition)
     elseif tick() < combatStickyUntil then
         moveCharacterCombat(targetRoot, deltaTime)
     else
@@ -2431,6 +2608,7 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
 
     if input.KeyCode == Enum.KeyCode.C then
         exitAllRecovery()
+        cancelAutoCombat()
         return
     end
 
@@ -2439,9 +2617,14 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         return
     end
 
+    if input.KeyCode == Enum.KeyCode.Zero then
+        runAutoCombat()
+        return
+    end
+
     if gameProcessed then return end
 
-    if input.KeyCode == Enum.KeyCode.Zero then
+    if input.KeyCode == Enum.KeyCode.K then
         victimCamEnabled = not victimCamEnabled
         if not victimCamEnabled then
             restoreCamera()
@@ -2587,7 +2770,9 @@ inputConnection = userInputService.InputBegan:Connect(function(input, gameProces
         wallRetreatActive = false
         m1Active = false
         ultedActive = false
+        manualRecoveryPark = false
         clearWallCache()
+        cancelAutoCombat()
         if not victimCamEnabled then restoreCamera() end
         return
     end
