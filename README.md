@@ -1,6 +1,7 @@
 # LarpingHub
 # THIS IS A PRIVATE HUB IF YOU SOMEHOW GET ACCESS TO THIS THEN I DONT KNOW LMAO
 
+(made by Luca_KrdBoss, alrot and dotfishzy (@aloroto1416)
 * Alt account, i will not accept any pull request only update scripts
 * This is a Hub that will be containing several scripts, No key, and free
 
