@@ -14,6 +14,19 @@ Made by **Luca_KrdBoss** and **alrot (@aloroto1416)**.
 * If you find a bug or have a suggestion, please report it through our Discord server.
 * Please do not claim scripts of larpinghub as your own or do **NOT** redistribute them without a proper license or permission!
 
+ # How do we log? It's simple! And you can also do this!
+ 
+ * With the help of Cloudflare you can send requests to your cloudflare worker and connect it to your discord webhook!
+ * We recommend putting your Webhook as a secret
+ * Also, add alot of protection to it! A simple data breach can ruin everything
+ * We also log users that are currently using the script with counterapi
+ * counterapi is easy and free to use except for the 1K user limit but they will only give you an email
+ * You can ask a friend who maybe be a hacker to try to hack into your worker and do a penetration test
+   - if you do not have a friend that hacks into websites or workers hackerai is also an option!
+   - Hackerai is limited, but you can ask it multiple things and also give you a fixed version so you can protect your cloudflare worker!
+   - It's simple and easy to use!
+  
+
 # WARNING!
 YOU ARE WARNED BEFORE EXECUTING ANY SCRIPTS BUT YOUR USERNAME, DISPLAY NAME, USERID, GAME NAME, GAME ID, JOB ID AND WHAT SCRIPT YOU EXECUTED WILL BE LOGGED!
 THIS WILL IN RESULT LOOK LIKE THIS (New Script Display Name is not logged yet and to clarify this is one of our developers alt account)
