@@ -1,4 +1,4 @@
-![Uploading image.png…]()
+<img width="1413" height="625" alt="image" src="https://github.com/user-attachments/assets/6a787ad8-1450-444f-8d93-59c4c1c485e8" />
 
 # LarpingHub
 
@@ -16,6 +16,10 @@ Made by **Luca_KrdBoss** and **alrot (@aloroto1416)**.
 
 # WARNING!
 YOU ARE WARNED BEFORE EXECUTING ANY SCRIPTS BUT YOUR USERNAME, DISPLAY NAME, USERID, GAME NAME, GAME ID, JOB ID AND WHAT SCRIPT YOU EXECUTED WILL BE LOGGED!
-THIS WILL IN RESULT LOOK LIKE THIS (New Script Display Name is not logged yet)
+THIS WILL IN RESULT LOOK LIKE THIS (New Script Display Name is not logged yet and to clarify this is one of our developers alt account)
 
 <img width="523" height="191" alt="image" src="https://github.com/user-attachments/assets/8f0e416d-70c0-4234-a038-2c96566e6adc" />
+
+
+Thank you if you use our scripts!!
+These scripts are 100% safe to use.
