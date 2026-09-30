@@ -1,8 +1,13 @@
 # LarpingHub
-# THIS IS A PRIVATE HUB IF YOU SOMEHOW GET ACCESS TO THIS THEN I DONT KNOW LMAO
 
-(made by Luca_KrdBoss, alrot and dotfishzy (@aloroto1416)
-* Alt account, i will not accept any pull request only update scripts
-* This is a Hub that will be containing several scripts, No key, and free
+Welcome to **LarpingHub**! If you need support, including the source code for a specific script, please open a ticket in our Discord server.
 
-* Safe to use! (If you've even found this which I wont doubt)
+Made by **Luca_KrdBoss** and **alrot (@aloroto1416)**.
+
+* This is an alternate account thanks to dotfishzy. I will not accept pull requests, only updates to existing scripts.
+* LarpingHub is a collection of various scripts.
+* All scripts are **free to use** and **require no key**.
+* All scripts are provided with safety in mind.
+* **dotfishzy** is a contributor to this Hub. Please do not harass or disrespect him.
+* If you find a bug or have a suggestion, please report it through our Discord server.
+* Please do not claim scripts of larpinghub as your own or do **NOT** redistribute them without a proper license or permission!
