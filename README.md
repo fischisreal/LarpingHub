@@ -25,7 +25,26 @@ Made by **Luca_KrdBoss** and **alrot (@aloroto1416)**.
    - if you do not have a friend that hacks into websites or workers hackerai is also an option!
    - Hackerai is limited, but you can ask it multiple things and also give you a fixed version so you can protect your cloudflare worker!
    - It's simple and easy to use!
-  
+
+
+  # Why do we log?
+  Logging may sound incredibly suspicous, and other scripts do it too!
+  We mainly log because of a few things:
+  - We want to know who is using our scripts and how many people are using them
+  - We want to see which game a script is being used in
+  - We want to make sure the script is being used for the game it was actually made for
+  - If we notice that a script is being used frequently in a different game, it can show us that there is interest in that game
+  - When that happens, we may decide to create a separate script specifically for that game
+  - Usage information also helps us understand which scripts are actually being used so we can focus future updates on them
+
+# Privacy & Transparency
+- Yes, we believe transparency is important.
+Before using a script, please read its warning and pay attention to any notices regarding network requests, logging, or external services.
+
+* Have we had breaches before
+- No, LarpingHub did not have a breach yet.
+- We are actively trying to add more layers of protection so nobody gets harrassed etc.
+
 
 # WARNING!
 You are warned before executing any of our scripts, incase you do not know yet:
